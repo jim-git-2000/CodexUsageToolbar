@@ -1,5 +1,5 @@
 {
-  "sshHost": "jiaming@192.168.32.123",
+  "sshHost": "user@192.168.x.x",
   "remoteCommand": "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json",
   "identityFile": null,
   "port": 22,

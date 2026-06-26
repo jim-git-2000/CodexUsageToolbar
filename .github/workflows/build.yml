@@ -56,10 +56,11 @@ jobs:
       - name: Add docs
         shell: pwsh
         run: |
-          Copy-Item PLAN.md artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
-          Copy-Item docs/P1_STATUS.md artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
-          Copy-Item settings.json artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
+          Copy-Item README.md artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
+          Copy-Item CHANGELOG.md artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
+          Copy-Item scripts artifacts/publish/win-x64/scripts -Recurse -ErrorAction SilentlyContinue
           Copy-Item settings.example.json artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
+          Copy-Item settings.example.json artifacts/publish/win-x64/settings.json -ErrorAction SilentlyContinue
 
       - name: Pack zip
         shell: pwsh
@@ -77,4 +78,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: CHANGELOG.md
           files: artifacts/dist/CodexUsageToolbar-win-x64.zip

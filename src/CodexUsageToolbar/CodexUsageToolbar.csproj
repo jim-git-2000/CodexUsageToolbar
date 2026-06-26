@@ -8,5 +8,15 @@
     <Nullable>enable</Nullable>
     <AssemblyName>CodexUsageToolbar</AssemblyName>
     <RootNamespace>CodexUsageToolbar</RootNamespace>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <Product>Codex Usage Toolbar</Product>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\AppIcon.ico" LogicalName="AppIcon.ico" />
+  </ItemGroup>
 </Project>

@@ -58,7 +58,7 @@ $text = ($output | Out-String).Trim()
 
 if ($exitCode -ne 0) {
     if ($text -match "Could not resolve hostname") {
-        Fail "ssh.exe could not resolve host. Use -SshHost jiaming@192.168.32.123 or configure codex-vm in SSH config."
+        Fail "ssh.exe could not resolve host. Use -SshHost user@192.168.x.x or configure codex-vm in SSH config."
     }
     if ($text -match "ccswitch-export" -and ($text -match "No such file|not found")) {
         Fail "SSH works, but ccswitch-export was not found on Ubuntu. Run bash scripts/install-ubuntu-exporter.sh on Ubuntu, then retry."

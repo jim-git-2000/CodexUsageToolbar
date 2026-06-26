@@ -16,24 +16,24 @@ P1 is complete.
 
 Current status:
 
-- SSH to the VM works with `jiaming@jiaming-VM-Ubuntu` and `jiaming@192.168.32.123`.
+- SSH to the VM works with `user@ubuntu-host` or `user@192.168.x.x`.
 - Ubuntu has `/usr/bin/cc-switch`.
 - Ubuntu exporter adapter has been implemented at `scripts/ccswitch-export`.
-- The exporter has been installed to `/home/jiaming/.local/bin/ccswitch-export`.
+- The exporter has been installed to `~/.local/bin/ccswitch-export`.
 - Local Ubuntu validation passes with `bash scripts/check-p1-exporter.sh`.
-- Windows SSH validation passes with `.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@192.168.32.123`.
+- Windows SSH validation passes with `.\scripts\Validate-P1Exporter.ps1 -SshHost user@192.168.x.x`.
 - `today` window support has been added after the first P1 pass; rerun `bash scripts/install-ubuntu-exporter.sh` and validate again to update the installed exporter.
 
 Previously observed command before installing the exporter:
 
 ```powershell
-.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@192.168.32.123
+.\scripts\Validate-P1Exporter.ps1 -SshHost user@192.168.x.x
 ```
 
 Observed result:
 
 ```text
-/home/jiaming/.local/bin/ccswitch-export: No such file or directory
+~/.local/bin/ccswitch-export: No such file or directory
 ```
 
 Passing Windows result:
@@ -105,7 +105,7 @@ The script checks:
 Diagnostic mode:
 
 ```powershell
-.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@192.168.32.123 -CheckOnly
+.\scripts\Validate-P1Exporter.ps1 -SshHost user@192.168.x.x -CheckOnly
 ```
 
 This only checks SSH, user/home, and possible cc-switch/exporter paths. It does not validate the JSON contract.
@@ -115,13 +115,13 @@ This only checks SSH, user/home, and possible cc-switch/exporter paths. It does 
 Detected Ubuntu prompt:
 
 ```text
-jiaming@jiaming-VM-Ubuntu:~$
+user@ubuntu-host:~$
 ```
 
 This means:
 
-- SSH user: `jiaming`
-- VM host name: `jiaming-VM-Ubuntu`
+- SSH user: `user`
+- VM host name: `ubuntu-host`
 
 Either run directly with the VM address:
 

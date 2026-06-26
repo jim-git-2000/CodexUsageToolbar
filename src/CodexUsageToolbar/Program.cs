@@ -243,6 +243,7 @@ internal static class Program
 internal sealed class TrayAppContext : ApplicationContext
 {
     private readonly Program.AppOptions _options;
+    private readonly Icon _appIcon;
     private readonly NotifyIcon _trayIcon;
     private readonly FloatingUsageWindow _window;
     private readonly System.Windows.Forms.Timer _timer;
@@ -254,10 +255,11 @@ internal sealed class TrayAppContext : ApplicationContext
     public TrayAppContext(Program.AppOptions options)
     {
         _options = options;
-        _window = new FloatingUsageWindow(options);
+        _appIcon = AppIcon.Load();
+        _window = new FloatingUsageWindow(options) { Icon = _appIcon };
         _trayIcon = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = _appIcon,
             Text = "Codex Usage Toolbar",
             Visible = true,
         };
@@ -412,6 +414,7 @@ internal sealed class TrayAppContext : ApplicationContext
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _window.Dispose();
+        _appIcon.Dispose();
         base.ExitThreadCore();
     }
 }
@@ -551,6 +554,33 @@ internal static class StartupManager
         {
             key.DeleteValue(ValueName, throwOnMissingValue: false);
         }
+    }
+}
+
+internal static class AppIcon
+{
+    public static Icon Load()
+    {
+        using (var stream = typeof(AppIcon).Assembly.GetManifestResourceStream("AppIcon.ico"))
+        {
+            if (stream is not null)
+            {
+                using var icon = new Icon(stream);
+                return (Icon)icon.Clone();
+            }
+        }
+
+        var path = Environment.ProcessPath ?? Application.ExecutablePath;
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        {
+            var icon = Icon.ExtractAssociatedIcon(path);
+            if (icon is not null)
+            {
+                return icon;
+            }
+        }
+
+        return (Icon)SystemIcons.Application.Clone();
     }
 }
 
@@ -964,8 +994,8 @@ internal sealed class FloatingUsageWindow : Form
 
     private void DrawQuotaBars(Graphics g, UsageState state)
     {
-        DrawQuotaBar(g, new Rectangle(20, 74, Width - 40, 44), "5h", state.Quota.FiveHour);
-        DrawQuotaBar(g, new Rectangle(20, 124, Width - 40, 44), "Week", state.Quota.Weekly);
+        DrawQuotaBar(g, new Rectangle(20, 74, Width - 40, 48), "5h", state.Quota.FiveHour);
+        DrawQuotaBar(g, new Rectangle(20, 128, Width - 40, 48), "Week", state.Quota.Weekly);
     }
 
     private void DrawQuotaBar(Graphics g, Rectangle bounds, string label, QuotaWindow quota)
@@ -974,7 +1004,7 @@ internal sealed class FloatingUsageWindow : Form
             ? Math.Clamp(quota.RemainingPercent.Value, 0, 100)
             : 0;
         using var labelFont = new Font("Segoe UI Semibold", 9.5f);
-        using var valueFont = new Font("Segoe UI Semibold", 16f);
+        using var valueFont = new Font("Segoe UI Semibold", 13.5f);
         using var smallFont = new Font("Segoe UI", 8f);
         using var titleBrush = new SolidBrush(PrimaryTextColor());
         using var valueBrush = new SolidBrush(PrimaryTextColor());
@@ -982,13 +1012,16 @@ internal sealed class FloatingUsageWindow : Form
         g.DrawString(label, labelFont, titleBrush, bounds.Left, bounds.Top);
         var value = UsageFormatter.FormatQuotaForUi(quota);
         var valueSize = g.MeasureString(value, valueFont);
-        g.DrawString(value, valueFont, valueBrush, bounds.Right - valueSize.Width, bounds.Top - 3);
+        var valueX = bounds.Right - valueSize.Width;
+        g.DrawString(value, valueFont, valueBrush, valueX, bounds.Top - 1);
 
         var reset = quota.Available ? $"Reset {UsageFormatter.FormatTime(quota.ResetAt)}" : "Unavailable";
-        g.DrawString(reset, smallFont, mutedBrush, bounds.Left + 42, bounds.Top + 2);
+        var resetX = bounds.Left + 58;
+        var resetWidth = Math.Max(24, (int)(valueX - resetX - 8));
+        g.DrawString(TrimToWidth(g, reset, smallFont, resetWidth), smallFont, mutedBrush, resetX, bounds.Top + 3);
 
-        var barTop = bounds.Top + 27;
-        var bar = new Rectangle(bounds.Left, barTop, bounds.Width, 10);
+        var barTop = bounds.Top + 32;
+        var bar = new Rectangle(bounds.Left, barTop, bounds.Width, 9);
         using var trackBrush = new SolidBrush(TrackColor());
         using var fillBrush = new SolidBrush(quota.Available ? _theme.Accent : DisabledColor());
         g.FillRoundedRectangle(trackBrush, bar, 5);

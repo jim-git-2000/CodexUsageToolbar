@@ -370,7 +370,7 @@ CodexUsageToolbar.exe 同目录\settings.json
 
 ```json
 {
-  "sshHost": "jiaming@192.168.32.123",
+  "sshHost": "user@192.168.x.x",
   "remoteCommand": "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json",
   "identityFile": null,
   "port": 22,
@@ -396,7 +396,7 @@ CodexUsageToolbar.exe 同目录\settings.json
 
 当前有效配置项：
 
-- `sshHost`：SSH 目标，例如 `jiaming@192.168.32.123` 或 `codex-vm`。
+- `sshHost`：SSH 目标，例如 `user@192.168.x.x` 或 `codex-vm`。
 - `remoteCommand`：Ubuntu exporter 命令。
 - `identityFile`：可选 SSH key 路径。
 - `port`：SSH 端口。
@@ -744,16 +744,16 @@ ssh codex-vm "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d -
 .\scripts\Validate-P1Exporter.ps1 -SshHost ubuntu@192.168.x.x -IdentityFile "$HOME\.ssh\codex_usage_vm_ed25519"
 ```
 
-如果 Ubuntu 提示符是 `jiaming@jiaming-VM-Ubuntu:~$`，可以先尝试：
+如果 Ubuntu 提示符是 `user@ubuntu-host:~$`，可以先尝试：
 
 ```powershell
-.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@jiaming-VM-Ubuntu
+.\scripts\Validate-P1Exporter.ps1 -SshHost user@ubuntu-host
 ```
 
 如果 SSH 已通但提示 `~/.local/bin/ccswitch-export` 不存在，先运行诊断：
 
 ```powershell
-.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@192.168.32.123 -CheckOnly
+.\scripts\Validate-P1Exporter.ps1 -SshHost user@192.168.x.x -CheckOnly
 ```
 
 然后根据实际 exporter 路径改用 `-RemoteCommand`，或先在 Ubuntu 侧创建 `~/.local/bin/ccswitch-export`。
@@ -810,13 +810,13 @@ Last refresh 14:23
 启动时可用参数或环境变量指定 SSH 目标：
 
 ```powershell
-.\CodexUsageToolbar.exe --ssh-host jiaming@192.168.32.123
+.\CodexUsageToolbar.exe --ssh-host user@192.168.x.x
 ```
 
 或：
 
 ```powershell
-$env:CODEX_USAGE_SSH_HOST = "jiaming@192.168.32.123"
+$env:CODEX_USAGE_SSH_HOST = "user@192.168.x.x"
 .\CodexUsageToolbar.exe
 ```
 
@@ -1050,7 +1050,7 @@ push 到 GitHub 后：
 5. 在 Windows PowerShell 中运行：
 
 ```powershell
-.\CodexUsageToolbar.exe --once --ssh-host jiaming@192.168.32.123
+.\CodexUsageToolbar.exe --once --ssh-host user@192.168.x.x
 ```
 
 如果使用 `codex-vm` SSH alias：

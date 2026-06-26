@@ -1,0 +1,5 @@
+.dotnet-home/
+bin/
+obj/
+*.user
+*.suo

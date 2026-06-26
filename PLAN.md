@@ -731,6 +731,8 @@ ssh codex-vm "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d -
 
 ### Phase 2 — Windows console prototype
 
+状态：已完成。
+
 目标：先不做 UI，只做拉取、解析、格式化。
 
 交付：
@@ -820,6 +822,8 @@ Last refresh 14:23
 或 HKCU Run key。
 
 ## 14. GitHub Actions 打包方案
+
+状态：已落地，见 `.github/workflows/build.yml`。
 
 ### 14.1 目标
 
@@ -979,6 +983,26 @@ Compress-Archive ...
 ```
 
 这样可以保证正式产物可复现，也避免开发机因为缺少某个 Windows 打包工具而阻塞。
+
+### 14.6 下载验证
+
+push 到 GitHub 后：
+
+1. 打开 GitHub 仓库的 `Actions` 页面。
+2. 进入最新的 `build` workflow run。
+3. 下载 `CodexUsageToolbar-win-x64` artifact。
+4. 解压 `CodexUsageToolbar-win-x64.zip`。
+5. 在 Windows PowerShell 中运行：
+
+```powershell
+.\CodexUsageToolbar.exe --once --ssh-host jiaming@192.168.32.123
+```
+
+如果使用 `codex-vm` SSH alias：
+
+```powershell
+.\CodexUsageToolbar.exe --once --ssh-host codex-vm
+```
 
 ## 15. 验收标准
 

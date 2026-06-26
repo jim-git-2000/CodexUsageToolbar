@@ -580,9 +580,15 @@ null       --
 
 ### 12.1 依赖约束
 
-MVP 依赖：
+MVP 运行依赖：
 
-- .NET 8 runtime。
+- Windows OpenSSH client。
+
+如果 GitHub Actions 发布 `self-contained` 单文件包，最终用户机器不需要额外安装 .NET runtime。
+
+开发 / 调试依赖：
+
+- .NET 8 SDK。
 - Windows OpenSSH client。
 - System.Text.Json。
 - WinForms。
@@ -596,8 +602,29 @@ MVP 依赖：
 - Chart library。
 - Web server。
 - Local background service。
+- Node.js / npm / pnpm / yarn。
+- Visual Studio 完整 IDE，除非后续确实需要调试 WinForms 设计器。
+- 本地安装 Inno Setup、WiX、MSIX Packaging Tool 等打包工具。
 
-### 12.2 资源目标
+### 12.2 本地环境边界
+
+本地开发尽量保持轻量：
+
+- 必须：编辑器 + Git。
+- 可选：.NET 8 SDK，用于 `dotnet run`、`dotnet test`、`dotnet build`。
+- 不要求：Visual Studio、Node.js、Electron/Tauri toolchain、Windows installer toolchain。
+- 不要求：本地生成 release zip、installer、签名包。
+
+本地常用命令只保留：
+
+```powershell
+dotnet run --project src/CodexUsageToolbar -- --once
+dotnet test
+```
+
+发布验证和最终打包放到 GitHub Actions。
+
+### 12.3 资源目标
 
 目标值：
 
@@ -607,7 +634,7 @@ MVP 依赖：
 - 正常刷新耗时：小于 1 秒；超时上限 5 秒。
 - 本地磁盘写入：只写 settings、last-good、小日志。
 
-### 12.3 UI 约束
+### 12.4 UI 约束
 
 MVP 不做动画。
 
@@ -707,16 +734,19 @@ Last refresh 14:23
 - 位置和模式重启后保持。
 - 设置变更后可生效。
 
-### Phase 5 — 打包与自启动
+### Phase 5 — GitHub Actions 打包与自启动
 
 目标：形成日常使用版本。
 
 交付：
 
-- zip 包。
+- GitHub Actions 生成 zip 包。
 - README。
 - 示例 `settings.json`。
+- release artifact。
 - 可选开机启动。
+
+本地不做正式打包。本地只做开发运行、单元测试和必要的手工验证。
 
 自启动方式优先使用：
 
@@ -726,7 +756,168 @@ Last refresh 14:23
 
 或 HKCU Run key。
 
-## 14. 验收标准
+## 14. GitHub Actions 打包方案
+
+### 14.1 目标
+
+打包只在 GitHub Actions 中完成，避免本地安装重型环境和打包工具。
+
+Actions 负责：
+
+- restore。
+- build。
+- test。
+- publish Windows x64。
+- 生成 zip。
+- 上传 artifact。
+- tag / release 时附加到 GitHub Release。
+
+本地负责：
+
+- 修改代码。
+- 可选运行 `dotnet run` 和 `dotnet test`。
+- 不负责生成正式发布包。
+
+### 14.2 推荐 workflow
+
+路径：
+
+```text
+.github/workflows/build.yml
+```
+
+触发：
+
+- `push` 到 `main`。
+- `pull_request`。
+- `workflow_dispatch` 手动打包。
+- `v*` tag 发布。
+
+建议 workflow：
+
+```yaml
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      - name: Publish win-x64
+        run: >
+          dotnet publish src/CodexUsageToolbar/CodexUsageToolbar.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --output artifacts/publish/win-x64
+          /p:PublishSingleFile=true
+          /p:EnableCompressionInSingleFile=true
+          /p:IncludeNativeLibrariesForSelfExtract=true
+          /p:PublishTrimmed=false
+
+      - name: Add sample files
+        shell: pwsh
+        run: |
+          Copy-Item README.md artifacts/publish/win-x64/ -ErrorAction SilentlyContinue
+          Copy-Item examples/settings.example.json artifacts/publish/win-x64/settings.example.json -ErrorAction SilentlyContinue
+
+      - name: Pack zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/dist | Out-Null
+          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/dist/CodexUsageToolbar-win-x64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CodexUsageToolbar-win-x64
+          path: artifacts/dist/CodexUsageToolbar-win-x64.zip
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: artifacts/dist/CodexUsageToolbar-win-x64.zip
+```
+
+说明：
+
+- `--self-contained true` 让最终 zip 不依赖目标机器安装 .NET runtime，代价是包体更大。
+- `PublishTrimmed=false` 是 WinForms 首版的保守选择，避免反射、资源、控件初始化被裁剪影响。
+- 不生成 installer，首版只发布 zip，降低维护成本。
+- 不在 workflow 里引入 Node、Electron、Tauri、WiX、MSIX。
+
+### 14.3 产物结构
+
+zip 解压后建议结构：
+
+```text
+CodexUsageToolbar-win-x64/
+  CodexUsageToolbar.exe
+  settings.example.json
+  README.md
+  LICENSE
+```
+
+运行后用户数据仍写入：
+
+```text
+%LOCALAPPDATA%\CodexUsageToolbar\
+```
+
+发布包里不包含用户私有配置、SSH key、last-good 缓存或日志。
+
+### 14.4 版本策略
+
+- 普通 push / PR：只验证 build 和 test，并上传临时 artifact。
+- 手动 `workflow_dispatch`：可生成测试 zip。
+- tag `v0.1.0`：生成 GitHub Release 附件。
+- 版本号后续从 csproj 的 `Version` / `AssemblyVersion` 统一管理。
+
+### 14.5 本地与 CI 职责边界
+
+本地不要安装专门打包环境。
+
+本地可以只做：
+
+```powershell
+dotnet run --project src/CodexUsageToolbar -- --once
+dotnet test
+```
+
+CI 必须做：
+
+```powershell
+dotnet publish ... --runtime win-x64 --self-contained true
+Compress-Archive ...
+```
+
+这样可以保证正式产物可复现，也避免开发机因为缺少某个 Windows 打包工具而阻塞。
+
+## 15. 验收标准
 
 MVP 完成标准：
 
@@ -743,44 +934,56 @@ MVP 完成标准：
 - Windows 端不读取任何 credential。
 - 无 Electron / WebView。
 
-## 15. 风险与规避
+## 16. 风险与规避
 
-### 15.1 cc-switch schema 变化
+### 16.1 cc-switch schema 变化
 
 风险：cc-switch 升级后内部数据库 schema 改变。
 
 规避：Windows 不直接读 cc-switch.db，只依赖 Ubuntu exporter 的稳定 JSON contract。
 
-### 15.2 quota 不可用
+### 16.2 quota 不可用
 
 风险：cc-switch 暂时无法查询 Codex 5h / weekly quota。
 
 规避：token 表继续显示；quota 区域显示 `--`；状态显示 `QUOTA_UNAVAILABLE`。
 
-### 15.3 token 数据延迟
+### 16.3 token 数据延迟
 
 风险：cc-switch usage sync 可能落后于实际 Codex 使用。
 
 规避：同时显示 `last refresh` 和 `cc_switch_last_event_at`。
 
-### 15.4 cost 与官方账单不完全一致
+### 16.4 cost 与官方账单不完全一致
 
 风险：cc-switch 的 cost 是 estimated cost，可能与官方最终账单不同。
 
 规避：UI 显示 `Cost`，expanded view 中标记 `Estimated by cc-switch`。
 
-### 15.5 SSH 卡住
+### 16.5 SSH 卡住
 
 风险：SSH 命令阻塞导致 UI 卡顿。
 
 规避：刷新在后台 task 执行；5 秒 command timeout；UI 线程只接收结果。
 
-## 16. 最终推荐结论
+### 16.6 CI 打包失败
+
+风险：GitHub Actions 的 Windows runner、.NET SDK 或 publish 参数变化导致 release 包生成失败。
+
+规避：workflow 固定 `actions/setup-dotnet@v4` 和 `8.0.x`；PR 必跑 build/test；tag release 前先用 `workflow_dispatch` 验证一次。
+
+### 16.7 self-contained 包体偏大
+
+风险：self-contained 单文件 zip 比 framework-dependent 包明显更大。
+
+规避：首版接受包体换取免安装；如果后续确实需要减小体积，再增加 framework-dependent artifact，但不要让本地打包链路变复杂。
+
+## 17. 最终推荐结论
 
 Windows 端实现为：
 
 ```text
-.NET 8 WinForms + Windows ssh.exe + System.Text.Json + last-good JSON cache
+.NET 8 WinForms + Windows ssh.exe + System.Text.Json + last-good JSON cache + GitHub Actions publish
 ```
 
 数据流：
@@ -797,7 +1000,9 @@ tray + floating compact/expanded window
 
 这个方案的关键点是：Windows 足够轻，只做展示；复杂的数据读取、Codex 过滤、token/cost/hit rate 计算全部留在 Ubuntu 的 cc-switch/exporter 侧。
 
-## 17. 资料依据
+打包策略是：本地尽量只保留编辑、运行和测试能力；正式 Windows zip 由 GitHub Actions 在 `windows-latest` 上生成。
+
+## 18. 资料依据
 
 - cc-switch README：Usage dashboard 支持 spending、requests、tokens、request logs 和 custom pricing。
 - cc-switch usage manual：Usage 页面支持时间范围、token trend、cache hit tokens、cost、request logs、App Type 过滤。

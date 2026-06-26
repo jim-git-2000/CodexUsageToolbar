@@ -46,7 +46,13 @@ collected_at: 2026-06-26T14:25:16+08:00
 windows: today, 1d, 7d, 14d, 30d
 ```
 
-Known limitation: quota fields currently return `available=false` with `QUOTA_UNAVAILABLE`; token, cache hit, request count, and cost fields are available from cc-switch DB aggregation.
+Quota status: exporter now reads non-secret `rate_limits` fields from Codex session JSONL files under `~/.codex/sessions/**/*.jsonl`.
+
+- 5h quota: `window_minutes == 300`
+- weekly quota: `window_minutes == 10080`
+- exported fields: `used_percent`, `remaining_percent`, `reset_at`, `available`
+
+Token, cache hit, request count, and cost fields are still aggregated from cc-switch DB.
 
 ## Added Validation Script
 

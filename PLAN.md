@@ -89,6 +89,7 @@ Ubuntu VM 中的 `ccswitch-export` 负责：
 
 - 从 cc-switch 3.16.1 读取 Codex quota / balance。
 - 从 cc-switch 3.16.1 读取 Codex token / cost / cache hit / request count。
+- 如果 cc-switch DB 没有 quota 表，则从 Codex session JSONL 的 `payload.rate_limits` 读取非敏感 quota 字段。
 - 只输出 Codex 数据。
 - 输出脱敏后的稳定 JSON。
 
@@ -341,7 +342,7 @@ Windows 端只依赖这个 contract。字段名必须稳定。
 
 - `app` 必须是 `codex`。
 - token 窗口必须包含 `today`、`1d`、`7d`、`14d`、`30d`。
-- `hit_rate` 用 0 到 1 的小数，Windows 负责格式化成百分比。
+- `hit_rate` 用 0 到 1 的小数，定义为 `cache_read_tokens / input_tokens`，Windows 负责格式化成百分比。
 - `total_cost_usd` 用数字，不带 `$`。
 - 时间使用 ISO 8601。
 - Windows 展示时转成本机时区。
@@ -381,11 +382,14 @@ CodexUsageToolbar.exe 同目录\settings.json
   "startHidden": false,
   "clickThrough": false,
   "startWithWindows": false,
+  "accentColor": "cyan",
+  "backgroundMode": "dark",
+  "quotaLayout": "ring",
   "window": {
     "x": null,
     "y": null,
     "width": 390,
-    "height": 170
+    "height": 190
   }
 }
 ```
@@ -404,6 +408,9 @@ CodexUsageToolbar.exe 同目录\settings.json
 - `startHidden`：启动时只进托盘，不显示悬浮窗。
 - `clickThrough`：悬浮窗是否点击穿透，也可在托盘右键菜单切换。
 - `startWithWindows`：是否写入 HKCU Run 开机启动，也可在托盘右键菜单切换。
+- `accentColor`：主色调，可选 `cyan`、`blue`、`green`、`purple`、`amber`，也可在托盘右键菜单切换。
+- `backgroundMode`：背景模式，可选 `dark`、`light`，也可在悬浮窗标题栏按钮切换。
+- `quotaLayout`：额度展示布局，可选 `ring`、`bar`，也可在悬浮窗标题栏按钮切换。
 - `window.x/y/width/height`：窗口初始位置和尺寸；`x/y` 为 `null` 时自动放到屏幕右上角。
 
 ## 8. 本地缓存与日志

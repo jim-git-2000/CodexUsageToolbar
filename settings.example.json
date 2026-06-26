@@ -11,10 +11,13 @@
   "startHidden": false,
   "clickThrough": false,
   "startWithWindows": false,
+  "accentColor": "cyan",
+  "backgroundMode": "dark",
+  "quotaLayout": "ring",
   "window": {
     "x": null,
     "y": null,
     "width": 390,
-    "height": 170
+    "height": 190
   }
 }

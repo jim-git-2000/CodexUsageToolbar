@@ -84,7 +84,10 @@ internal static class Program
         bool AlwaysOnTop,
         bool StartHidden,
         bool ClickThrough,
-        bool StartWithWindows)
+        bool StartWithWindows,
+        string AccentColor,
+        string BackgroundMode,
+        string QuotaLayout)
     {
         public static string HelpText =>
             """
@@ -118,12 +121,15 @@ internal static class Program
             var windowX = settings.Window?.X;
             var windowY = settings.Window?.Y;
             var windowWidth = settings.Window?.Width ?? 390;
-            var windowHeight = settings.Window?.Height ?? 170;
+            var windowHeight = settings.Window?.Height ?? 190;
             var opacity = settings.Opacity ?? 0.95;
             var alwaysOnTop = settings.AlwaysOnTop ?? true;
             var startHidden = settings.StartHidden ?? false;
             var clickThrough = settings.ClickThrough ?? false;
             var startWithWindows = settings.StartWithWindows ?? false;
+            var accentColor = settings.AccentColor ?? ThemePalette.DefaultKey;
+            var backgroundMode = ResolveChoice(settings.BackgroundMode, "dark", "dark", "light");
+            var quotaLayout = ResolveChoice(settings.QuotaLayout, "ring", "ring", "bar");
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -192,7 +198,23 @@ internal static class Program
                 alwaysOnTop,
                 startHidden,
                 clickThrough,
-                startWithWindows);
+                startWithWindows,
+                ThemePalette.Resolve(accentColor).Key,
+                backgroundMode,
+                quotaLayout);
+        }
+
+        public static string ResolveChoice(string? value, string fallback, params string[] allowed)
+        {
+            foreach (var item in allowed)
+            {
+                if (StringComparer.OrdinalIgnoreCase.Equals(value, item))
+                {
+                    return item;
+                }
+            }
+
+            return fallback;
         }
 
         private static string RequireValue(string[] args, ref int index, string name)
@@ -241,6 +263,7 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _trayIcon.ContextMenuStrip = BuildMenu();
         _trayIcon.DoubleClick += (_, _) => ToggleWindow();
+        _window.RefreshRequested += async (_, _) => await RefreshAsync(force: true);
         if (options.StartWithWindows && !StartupManager.IsEnabled())
         {
             StartupManager.SetEnabled(true);
@@ -291,6 +314,32 @@ internal sealed class TrayAppContext : ApplicationContext
             SettingsStore.SaveRuntimeFlags(startWithWindows: _startWithWindowsItem.Checked);
         };
         menu.Items.Add(_startWithWindowsItem);
+
+        var themeMenu = new ToolStripMenuItem("Theme color");
+        foreach (var theme in ThemePalette.Options)
+        {
+            var item = new ToolStripMenuItem(theme.Label)
+            {
+                Checked = StringComparer.OrdinalIgnoreCase.Equals(theme.Key, _options.AccentColor),
+                Tag = theme.Key,
+            };
+            item.Click += (_, _) =>
+            {
+                var key = (string)item.Tag!;
+                _window.SetAccent(ThemePalette.Resolve(key));
+                SettingsStore.SaveRuntimeFlags(accentColor: key);
+                foreach (ToolStripItem sibling in themeMenu.DropDownItems)
+                {
+                    if (sibling is ToolStripMenuItem siblingItem)
+                    {
+                        siblingItem.Checked = ReferenceEquals(siblingItem, item);
+                    }
+                }
+            };
+            themeMenu.DropDownItems.Add(item);
+        }
+
+        menu.Items.Add(themeMenu);
         menu.Items.Add("Open settings file", null, (_, _) => SettingsStore.OpenSettingsFile());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
@@ -440,13 +489,22 @@ internal static class SettingsStore
         });
     }
 
-    public static void SaveRuntimeFlags(bool? clickThrough = null, bool? alwaysOnTop = null, bool? startWithWindows = null)
+    public static void SaveRuntimeFlags(
+        bool? clickThrough = null,
+        bool? alwaysOnTop = null,
+        bool? startWithWindows = null,
+        string? accentColor = null,
+        string? backgroundMode = null,
+        string? quotaLayout = null)
     {
         Save(settings =>
         {
             if (clickThrough is not null) settings.ClickThrough = clickThrough;
             if (alwaysOnTop is not null) settings.AlwaysOnTop = alwaysOnTop;
             if (startWithWindows is not null) settings.StartWithWindows = startWithWindows;
+            if (!string.IsNullOrWhiteSpace(accentColor)) settings.AccentColor = ThemePalette.Resolve(accentColor).Key;
+            if (!string.IsNullOrWhiteSpace(backgroundMode)) settings.BackgroundMode = Program.AppOptions.ResolveChoice(backgroundMode, "dark", "dark", "light");
+            if (!string.IsNullOrWhiteSpace(quotaLayout)) settings.QuotaLayout = Program.AppOptions.ResolveChoice(quotaLayout, "ring", "ring", "bar");
         });
     }
 
@@ -511,7 +569,41 @@ internal sealed class AppSettings
     public bool? StartHidden { get; set; }
     public bool? ClickThrough { get; set; }
     public bool? StartWithWindows { get; set; }
+    public string? AccentColor { get; set; }
+    public string? BackgroundMode { get; set; }
+    public string? QuotaLayout { get; set; }
     public WindowSettings? Window { get; set; }
+}
+
+internal sealed record ThemeOption(string Key, string Label, Color Accent);
+
+internal static class ThemePalette
+{
+    public const string DefaultKey = "cyan";
+
+    public static readonly ThemeOption[] Options =
+    [
+        new("cyan", "Cyan", Color.FromArgb(65, 235, 210)),
+        new("blue", "Blue", Color.FromArgb(92, 166, 255)),
+        new("green", "Green", Color.FromArgb(97, 218, 139)),
+        new("purple", "Purple", Color.FromArgb(185, 132, 255)),
+        new("amber", "Amber", Color.FromArgb(245, 182, 84)),
+    ];
+
+    public static ThemeOption Resolve(string? key)
+    {
+        foreach (var option in Options)
+        {
+            if (StringComparer.OrdinalIgnoreCase.Equals(option.Key, key))
+            {
+                return option;
+            }
+        }
+
+        return Options[0];
+    }
+
+    public static Color WithAlpha(Color color, int alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
 }
 
 internal sealed class WindowSettings
@@ -524,7 +616,7 @@ internal sealed class WindowSettings
 
 internal sealed class FloatingUsageWindow : Form
 {
-    private const int CompactHeight = 170;
+    private const int CompactHeight = 190;
     private const int ExpandedHeight = 360;
     private const int ResizeGrip = 8;
     private const int WmNcHitTest = 0x0084;
@@ -547,10 +639,21 @@ internal sealed class FloatingUsageWindow : Form
     private bool _dragging;
     private bool _expanded;
     private bool _clickThrough;
+    private bool _lightMode;
+    private bool _barLayout;
+    private Rectangle _modeButton;
+    private Rectangle _layoutButton;
     private Rectangle _toggleButton;
+    private Rectangle _refreshButton;
+    private int _compactHeight = CompactHeight;
+    private int _expandedHeight = ExpandedHeight;
+    private ThemeOption _theme;
+
+    public event EventHandler? RefreshRequested;
 
     public FloatingUsageWindow(Program.AppOptions options)
     {
+        _theme = ThemePalette.Resolve(options.AccentColor);
         Text = "Codex Usage";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -563,6 +666,10 @@ internal sealed class FloatingUsageWindow : Form
         Location = ResolveLocation(options);
         Opacity = options.Opacity;
         _clickThrough = options.ClickThrough;
+        _lightMode = StringComparer.OrdinalIgnoreCase.Equals(options.BackgroundMode, "light");
+        _barLayout = StringComparer.OrdinalIgnoreCase.Equals(options.QuotaLayout, "bar");
+        _compactHeight = Math.Max(CompactHeight, Height);
+        _expandedHeight = Math.Max(ExpandedHeight, Height);
     }
 
     private static Point ResolveLocation(Program.AppOptions options)
@@ -610,6 +717,12 @@ internal sealed class FloatingUsageWindow : Form
         ApplyClickThrough();
     }
 
+    public void SetAccent(ThemeOption theme)
+    {
+        _theme = theme;
+        Invalidate();
+    }
+
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -621,6 +734,24 @@ internal sealed class FloatingUsageWindow : Form
         if (_toggleButton.Contains(e.Location))
         {
             ToggleExpanded();
+            return;
+        }
+
+        if (_modeButton.Contains(e.Location))
+        {
+            ToggleBackgroundMode();
+            return;
+        }
+
+        if (_layoutButton.Contains(e.Location))
+        {
+            ToggleQuotaLayout();
+            return;
+        }
+
+        if (_refreshButton.Contains(e.Location))
+        {
+            RefreshRequested?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -666,6 +797,15 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
+        if (_expanded)
+        {
+            _expandedHeight = Math.Max(ExpandedHeight, Height);
+        }
+        else
+        {
+            _compactHeight = Math.Max(CompactHeight, Height);
+        }
+
         Invalidate();
     }
 
@@ -720,9 +860,11 @@ internal sealed class FloatingUsageWindow : Form
 
     private void DrawBackground(Graphics g)
     {
-        using var bg = new LinearGradientBrush(ClientRectangle, Color.FromArgb(10, 15, 28), Color.FromArgb(18, 30, 46), 35f);
+        var start = _lightMode ? Color.FromArgb(244, 248, 251) : Color.FromArgb(10, 15, 28);
+        var end = _lightMode ? Color.FromArgb(224, 235, 242) : Color.FromArgb(18, 30, 46);
+        using var bg = new LinearGradientBrush(ClientRectangle, start, end, 35f);
         g.FillRectangle(bg, ClientRectangle);
-        using var border = new Pen(Color.FromArgb(80, 80, 220, 230), 1);
+        using var border = new Pen(ThemePalette.WithAlpha(_theme.Accent, _lightMode ? 135 : 85), 1);
         g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
     }
 
@@ -733,7 +875,7 @@ internal sealed class FloatingUsageWindow : Form
             return;
         }
 
-        using var pen = new Pen(Color.FromArgb(95, 90, 215, 230), 1);
+        using var pen = new Pen(ThemePalette.WithAlpha(_theme.Accent, 95), 1);
         var x = Width - 18;
         var y = Height - 18;
         g.DrawLine(pen, x + 10, y + 2, x + 2, y + 10);
@@ -744,24 +886,46 @@ internal sealed class FloatingUsageWindow : Form
     {
         using var titleFont = new Font("Segoe UI Semibold", 12f);
         using var metaFont = new Font("Segoe UI", 8.5f);
-        using var titleBrush = new SolidBrush(Color.FromArgb(232, 248, 255));
-        using var metaBrush = new SolidBrush(Color.FromArgb(125, 190, 205));
-        g.DrawString("Codex Usage", titleFont, titleBrush, 18, 14);
-        g.DrawString(_stale ? "STALE" : _loading ? "SYNC" : "LIVE", metaFont, metaBrush, Width - 62, 18);
-        _toggleButton = new Rectangle(Width - 104, 42, 84, 26);
-        using var buttonBrush = new SolidBrush(Color.FromArgb(32, 58, 78));
-        using var buttonBorder = new Pen(Color.FromArgb(90, 215, 230), 1);
-        using var buttonText = new SolidBrush(Color.FromArgb(210, 245, 250));
+        using var titleBrush = new SolidBrush(PrimaryTextColor());
+        using var metaBrush = new SolidBrush(MutedTextColor());
+
+        var buttonY = 14;
+        var gap = 6;
+        _refreshButton = new Rectangle(Width - 82, buttonY, 64, 26);
+        _toggleButton = new Rectangle(_refreshButton.Left - 72 - gap, buttonY, 72, 26);
+        _layoutButton = new Rectangle(_toggleButton.Left - 52 - gap, buttonY, 52, 26);
+        _modeButton = new Rectangle(_layoutButton.Left - 56 - gap, buttonY, 56, 26);
+
+        var titleWidth = Math.Max(38, _modeButton.Left - 26);
+        g.DrawString(TrimToWidth(g, "Codex Usage", titleFont, titleWidth), titleFont, titleBrush, 18, 14);
+        g.DrawString(_stale ? "STALE" : _loading ? "SYNC" : "LIVE", metaFont, metaBrush, 18, 42);
+
+        DrawHeaderButton(g, _modeButton, _lightMode ? "Dark" : "Light");
+        DrawHeaderButton(g, _layoutButton, _barLayout ? "Ring" : "Bar");
+        DrawHeaderButton(g, _toggleButton, _expanded ? "Hide" : "Tokens");
+        DrawHeaderButton(g, _refreshButton, "Refresh");
+    }
+
+    private void DrawHeaderButton(Graphics g, Rectangle bounds, string label)
+    {
+        using var buttonBrush = new SolidBrush(_lightMode ? Color.FromArgb(232, 241, 246) : Color.FromArgb(32, 58, 78));
+        using var buttonBorder = new Pen(ThemePalette.WithAlpha(_theme.Accent, _lightMode ? 190 : 160), 1);
+        using var buttonText = new SolidBrush(_lightMode ? Color.FromArgb(24, 45, 58) : ThemePalette.WithAlpha(_theme.Accent, 245));
         using var buttonFont = new Font("Segoe UI Semibold", 8.5f);
-        g.FillRoundedRectangle(buttonBrush, _toggleButton, 6);
-        g.DrawRoundedRectangle(buttonBorder, _toggleButton, 6);
-        var label = _expanded ? "Hide tokens" : "Tokens";
+        g.FillRoundedRectangle(buttonBrush, bounds, 6);
+        g.DrawRoundedRectangle(buttonBorder, bounds, 6);
         var labelSize = g.MeasureString(label, buttonFont);
-        g.DrawString(label, buttonFont, buttonText, _toggleButton.Left + (_toggleButton.Width - labelSize.Width) / 2, _toggleButton.Top + 5);
+        g.DrawString(label, buttonFont, buttonText, bounds.Left + (bounds.Width - labelSize.Width) / 2, bounds.Top + 5);
     }
 
     private void DrawQuotaPanel(Graphics g, UsageState state)
     {
+        if (_barLayout)
+        {
+            DrawQuotaBars(g, state);
+            return;
+        }
+
         var top = 72;
         var panelHeight = Math.Min(112, Height - 108);
         var half = (Width - 40) / 2;
@@ -769,15 +933,15 @@ internal sealed class FloatingUsageWindow : Form
         DrawQuotaCircle(g, new Rectangle(28 + half, top, half - 8, panelHeight), "Week", state.Quota.Weekly);
     }
 
-    private static void DrawQuotaCircle(Graphics g, Rectangle bounds, string label, QuotaWindow quota)
+    private void DrawQuotaCircle(Graphics g, Rectangle bounds, string label, QuotaWindow quota)
     {
         var diameter = Math.Min(74, Math.Max(54, bounds.Height - 28));
         var circle = new Rectangle(bounds.Left, bounds.Top + 4, diameter, diameter);
         var percent = quota.Available && quota.RemainingPercent is not null
             ? Math.Clamp(quota.RemainingPercent.Value, 0, 100)
             : 0;
-        using var track = new Pen(Color.FromArgb(38, 62, 80), 8);
-        using var fill = new Pen(quota.Available ? Color.FromArgb(65, 235, 210) : Color.FromArgb(76, 91, 108), 8)
+        using var track = new Pen(TrackColor(), 8);
+        using var fill = new Pen(quota.Available ? _theme.Accent : Color.FromArgb(76, 91, 108), 8)
         {
             StartCap = LineCap.Round,
             EndCap = LineCap.Round,
@@ -788,14 +952,59 @@ internal sealed class FloatingUsageWindow : Form
         using var labelFont = new Font("Segoe UI Semibold", 10f);
         using var valueFont = new Font("Segoe UI Semibold", 17f);
         using var smallFont = new Font("Segoe UI", 8.5f);
-        using var titleBrush = new SolidBrush(Color.FromArgb(220, 238, 245));
-        using var valueBrush = new SolidBrush(Color.FromArgb(235, 252, 255));
-        using var mutedBrush = new SolidBrush(Color.FromArgb(140, 160, 174));
+        using var titleBrush = new SolidBrush(PrimaryTextColor());
+        using var valueBrush = new SolidBrush(PrimaryTextColor());
+        using var mutedBrush = new SolidBrush(MutedTextColor());
         var textX = circle.Right + 12;
         g.DrawString(label, labelFont, titleBrush, textX, bounds.Top + 4);
         g.DrawString(UsageFormatter.FormatQuotaForUi(quota), valueFont, valueBrush, textX, bounds.Top + 26);
         var reset = quota.Available ? $"Reset {UsageFormatter.FormatTime(quota.ResetAt)}" : "Unavailable";
         g.DrawString(reset, smallFont, mutedBrush, textX, bounds.Top + 62);
+    }
+
+    private void DrawQuotaBars(Graphics g, UsageState state)
+    {
+        DrawQuotaBar(g, new Rectangle(20, 74, Width - 40, 44), "5h", state.Quota.FiveHour);
+        DrawQuotaBar(g, new Rectangle(20, 124, Width - 40, 44), "Week", state.Quota.Weekly);
+    }
+
+    private void DrawQuotaBar(Graphics g, Rectangle bounds, string label, QuotaWindow quota)
+    {
+        var percent = quota.Available && quota.RemainingPercent is not null
+            ? Math.Clamp(quota.RemainingPercent.Value, 0, 100)
+            : 0;
+        using var labelFont = new Font("Segoe UI Semibold", 9.5f);
+        using var valueFont = new Font("Segoe UI Semibold", 16f);
+        using var smallFont = new Font("Segoe UI", 8f);
+        using var titleBrush = new SolidBrush(PrimaryTextColor());
+        using var valueBrush = new SolidBrush(PrimaryTextColor());
+        using var mutedBrush = new SolidBrush(MutedTextColor());
+        g.DrawString(label, labelFont, titleBrush, bounds.Left, bounds.Top);
+        var value = UsageFormatter.FormatQuotaForUi(quota);
+        var valueSize = g.MeasureString(value, valueFont);
+        g.DrawString(value, valueFont, valueBrush, bounds.Right - valueSize.Width, bounds.Top - 3);
+
+        var reset = quota.Available ? $"Reset {UsageFormatter.FormatTime(quota.ResetAt)}" : "Unavailable";
+        g.DrawString(reset, smallFont, mutedBrush, bounds.Left + 42, bounds.Top + 2);
+
+        var barTop = bounds.Top + 27;
+        var bar = new Rectangle(bounds.Left, barTop, bounds.Width, 10);
+        using var trackBrush = new SolidBrush(TrackColor());
+        using var fillBrush = new SolidBrush(quota.Available ? _theme.Accent : DisabledColor());
+        g.FillRoundedRectangle(trackBrush, bar, 5);
+        var fillWidth = Math.Max(0, (int)Math.Round(bar.Width * percent / 100.0));
+        if (fillWidth > 0)
+        {
+            var fill = new Rectangle(bar.Left, bar.Top, fillWidth, bar.Height);
+            if (fillWidth < bar.Height)
+            {
+                g.FillRectangle(fillBrush, fill);
+            }
+            else
+            {
+                g.FillRoundedRectangle(fillBrush, fill, 5);
+            }
+        }
     }
 
     private void DrawTokenTable(Graphics g, UsageState state)
@@ -806,13 +1015,13 @@ internal sealed class FloatingUsageWindow : Form
             return;
         }
 
-        using var line = new Pen(Color.FromArgb(36, 70, 90), 1);
+        using var line = new Pen(TrackColor(), 1);
         g.DrawLine(line, 20, y - 12, Width - 20, y - 12);
         using var headFont = new Font("Segoe UI Semibold", 8.5f);
         using var rowFont = new Font("Segoe UI", 8.5f);
-        using var headBrush = new SolidBrush(Color.FromArgb(130, 205, 216));
-        using var rowBrush = new SolidBrush(Color.FromArgb(222, 235, 240));
-        using var mutedBrush = new SolidBrush(Color.FromArgb(145, 160, 174));
+        using var headBrush = new SolidBrush(ThemePalette.WithAlpha(_theme.Accent, 220));
+        using var rowBrush = new SolidBrush(PrimaryTextColor());
+        using var mutedBrush = new SolidBrush(MutedTextColor());
         var cols = GetTableColumns();
         DrawCells(g, headFont, headBrush, y, cols, "Range", "Tokens", "Hit", "Hit%", "Req", "Cost");
         y += 24;
@@ -861,27 +1070,52 @@ internal sealed class FloatingUsageWindow : Form
     private void DrawFooter(Graphics g, UsageState state)
     {
         using var font = new Font("Segoe UI", 8f);
-        using var brush = new SolidBrush(_error is null ? Color.FromArgb(118, 140, 154) : Color.FromArgb(255, 180, 120));
+        using var brush = new SolidBrush(_error is null ? MutedTextColor() : Color.FromArgb(210, 106, 35));
         var text = _error is null
             ? $"Refresh {UsageFormatter.FormatTime(state.LastSuccessAt)}  Event {UsageFormatter.FormatTime(state.LastEventAt)}"
             : $"Using last good data - {_error}";
         g.DrawString(TrimToWidth(g, text, font, Width - 36), font, brush, 18, Height - 28);
     }
 
+    private void ToggleBackgroundMode()
+    {
+        _lightMode = !_lightMode;
+        SettingsStore.SaveRuntimeFlags(backgroundMode: _lightMode ? "light" : "dark");
+        Invalidate();
+    }
+
+    private void ToggleQuotaLayout()
+    {
+        _barLayout = !_barLayout;
+        SettingsStore.SaveRuntimeFlags(quotaLayout: _barLayout ? "bar" : "ring");
+        Invalidate();
+    }
+
     private void ToggleExpanded()
     {
-        _expanded = !_expanded;
-        if (_expanded && Height < ExpandedHeight)
+        if (_expanded)
         {
-            Height = ExpandedHeight;
+            _expandedHeight = Math.Max(ExpandedHeight, Height);
+            _expanded = false;
+            Height = Math.Max(CompactHeight, _compactHeight);
         }
-        else if (!_expanded && Height > CompactHeight)
+        else
         {
-            Height = CompactHeight;
+            _compactHeight = Math.Max(CompactHeight, Height);
+            _expanded = true;
+            Height = Math.Max(ExpandedHeight, _expandedHeight);
         }
 
         Invalidate();
     }
+
+    private Color PrimaryTextColor() => _lightMode ? Color.FromArgb(20, 34, 46) : Color.FromArgb(232, 248, 255);
+
+    private Color MutedTextColor() => _lightMode ? Color.FromArgb(82, 104, 120) : Color.FromArgb(140, 160, 174);
+
+    private Color TrackColor() => _lightMode ? Color.FromArgb(198, 214, 224) : Color.FromArgb(38, 62, 80);
+
+    private Color DisabledColor() => _lightMode ? Color.FromArgb(150, 164, 176) : Color.FromArgb(76, 91, 108);
 
     private bool IsInResizeZone(Point p)
     {
@@ -948,8 +1182,8 @@ internal sealed class FloatingUsageWindow : Form
     {
         using var font = new Font("Segoe UI Semibold", 10f);
         using var detailFont = new Font("Segoe UI", 8.5f);
-        using var brush = new SolidBrush(Color.FromArgb(218, 238, 244));
-        using var muted = new SolidBrush(Color.FromArgb(145, 160, 176));
+        using var brush = new SolidBrush(PrimaryTextColor());
+        using var muted = new SolidBrush(MutedTextColor());
         g.DrawString(message, font, brush, 20, 82);
         if (!string.IsNullOrWhiteSpace(detail))
         {

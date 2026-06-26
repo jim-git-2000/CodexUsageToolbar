@@ -23,6 +23,18 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Set package version
+        id: package_version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            "PACKAGE_VERSION=$($env:GITHUB_REF_NAME)" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "version=$($env:GITHUB_REF_NAME)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "PACKAGE_VERSION=dev" | Out-File -FilePath $env:GITHUB_ENV -Append
+            "version=dev" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
       - name: Restore
         run: >
           dotnet restore src/CodexUsageToolbar/CodexUsageToolbar.csproj
@@ -66,17 +78,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/dist | Out-Null
-          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/dist/CodexUsageToolbar-win-x64.zip -Force
+          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath "artifacts/dist/CodexUsageToolbar-$env:PACKAGE_VERSION-win-x64.zip" -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CodexUsageToolbar-win-x64
-          path: artifacts/dist/CodexUsageToolbar-win-x64.zip
+          name: CodexUsageToolbar-${{ steps.package_version.outputs.version }}-win-x64
+          path: artifacts/dist/CodexUsageToolbar-${{ steps.package_version.outputs.version }}-win-x64.zip
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           body_path: CHANGELOG.md
-          files: artifacts/dist/CodexUsageToolbar-win-x64.zip
+          files: artifacts/dist/CodexUsageToolbar-${{ steps.package_version.outputs.version }}-win-x64.zip

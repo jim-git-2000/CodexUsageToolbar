@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.0 - 2026-06-26
+
+- Added custom application/tray icon support.
+- Added font size controls in the tray menu.
+- Improved floating window behavior for task switching and virtual desktop changes.
+- Improved release packaging with versioned zip names.
+
 ## v1.0.0 - 2026-06-26
 
 - Added Windows floating toolbar with tray controls.

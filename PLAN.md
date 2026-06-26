@@ -973,17 +973,17 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifacts/dist | Out-Null
-          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/dist/CodexUsageToolbar-win-x64.zip -Force
+          Compress-Archive -Path artifacts/publish/win-x64/* -DestinationPath artifacts/dist/CodexUsageToolbar-$env:PACKAGE_VERSION-win-x64.zip -Force
 
       - uses: actions/upload-artifact@v4
         with:
-          name: CodexUsageToolbar-win-x64
-          path: artifacts/dist/CodexUsageToolbar-win-x64.zip
+          name: CodexUsageToolbar-${{ steps.package_version.outputs.version }}-win-x64
+          path: artifacts/dist/CodexUsageToolbar-${{ steps.package_version.outputs.version }}-win-x64.zip
 
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: artifacts/dist/CodexUsageToolbar-win-x64.zip
+          files: artifacts/dist/CodexUsageToolbar-${{ steps.package_version.outputs.version }}-win-x64.zip
 ```
 
 说明：
@@ -1047,8 +1047,8 @@ push 到 GitHub 后：
 
 1. 打开 GitHub 仓库的 `Actions` 页面。
 2. 进入最新的 `build` workflow run。
-3. 下载 `CodexUsageToolbar-win-x64` artifact。
-4. 解压 `CodexUsageToolbar-win-x64.zip`。
+3. 下载 `CodexUsageToolbar-dev-win-x64` 或 `CodexUsageToolbar-vX.Y.Z-win-x64` artifact。
+4. 解压对应的 `CodexUsageToolbar-*-win-x64.zip`。
 5. 在 Windows PowerShell 中运行：
 
 ```powershell

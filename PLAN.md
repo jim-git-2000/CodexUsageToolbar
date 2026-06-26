@@ -933,6 +933,7 @@ jobs:
 说明：
 
 - `--self-contained true` 让最终 zip 不依赖目标机器安装 .NET runtime，代价是包体更大。
+- CI 使用 `NuGet.CI.config` 访问 `nuget.org` 获取 Windows runtime packs；本地 `NuGet.config` 仍清空外部源，保持普通 build 轻量。
 - `PublishTrimmed=false` 是 WinForms 首版的保守选择，避免反射、资源、控件初始化被裁剪影响。
 - 不生成 installer，首版只发布 zip，降低维护成本。
 - 不在 workflow 里引入 Node、Electron、Tauri、WiX、MSIX。

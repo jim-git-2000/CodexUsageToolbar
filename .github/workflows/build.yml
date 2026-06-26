@@ -24,10 +24,16 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Restore
-        run: dotnet restore CodexUsageToolbar.sln
+        run: dotnet restore CodexUsageToolbar.sln --configfile NuGet.CI.config
 
       - name: Build
         run: dotnet build CodexUsageToolbar.sln --configuration Release --no-restore
+
+      - name: Restore win-x64 runtime packs
+        run: >
+          dotnet restore src/CodexUsageToolbar/CodexUsageToolbar.csproj
+          --runtime win-x64
+          --configfile NuGet.CI.config
 
       - name: Publish win-x64
         run: >
@@ -35,6 +41,7 @@ jobs:
           --configuration Release
           --runtime win-x64
           --self-contained true
+          --no-restore
           --output artifacts/publish/win-x64
           /p:PublishSingleFile=true
           /p:EnableCompressionInSingleFile=true

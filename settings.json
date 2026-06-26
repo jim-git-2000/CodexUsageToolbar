@@ -14,6 +14,7 @@
   "accentColor": "cyan",
   "backgroundMode": "dark",
   "quotaLayout": "ring",
+  "fontScale": 1.0,
   "window": {
     "x": null,
     "y": null,

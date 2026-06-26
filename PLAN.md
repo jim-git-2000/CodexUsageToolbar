@@ -385,6 +385,7 @@ CodexUsageToolbar.exe 同目录\settings.json
   "accentColor": "cyan",
   "backgroundMode": "dark",
   "quotaLayout": "ring",
+  "fontScale": 1.0,
   "window": {
     "x": null,
     "y": null,
@@ -411,6 +412,7 @@ CodexUsageToolbar.exe 同目录\settings.json
 - `accentColor`：主色调，可选 `cyan`、`blue`、`green`、`purple`、`amber`，也可在托盘右键菜单切换。
 - `backgroundMode`：背景模式，可选 `dark`、`light`，也可在悬浮窗标题栏按钮切换。
 - `quotaLayout`：额度展示布局，可选 `ring`、`bar`，也可在悬浮窗标题栏按钮切换。
+- `fontScale`：整体字体比例，程序限制在 0.85 到 1.25，也可在托盘右键菜单切换。
 - `window.x/y/width/height`：窗口初始位置和尺寸；`x/y` 为 `null` 时自动放到屏幕右上角。
 
 ## 8. 本地缓存与日志

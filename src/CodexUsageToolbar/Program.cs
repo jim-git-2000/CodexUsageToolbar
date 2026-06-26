@@ -87,7 +87,8 @@ internal static class Program
         bool StartWithWindows,
         string AccentColor,
         string BackgroundMode,
-        string QuotaLayout)
+        string QuotaLayout,
+        double FontScale)
     {
         public static string HelpText =>
             """
@@ -130,6 +131,7 @@ internal static class Program
             var accentColor = settings.AccentColor ?? ThemePalette.DefaultKey;
             var backgroundMode = ResolveChoice(settings.BackgroundMode, "dark", "dark", "light");
             var quotaLayout = ResolveChoice(settings.QuotaLayout, "ring", "ring", "bar");
+            var fontScale = settings.FontScale ?? 1.0;
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -178,6 +180,7 @@ internal static class Program
             windowWidth = Math.Clamp(windowWidth, 320, 900);
             windowHeight = Math.Clamp(windowHeight, 180, 700);
             opacity = Math.Clamp(opacity, 0.35, 1.0);
+            fontScale = Math.Clamp(fontScale, 0.85, 1.25);
 
             return new AppOptions(
                 once,
@@ -201,7 +204,8 @@ internal static class Program
                 startWithWindows,
                 ThemePalette.Resolve(accentColor).Key,
                 backgroundMode,
-                quotaLayout);
+                quotaLayout,
+                fontScale);
         }
 
         public static string ResolveChoice(string? value, string fallback, params string[] allowed)
@@ -342,6 +346,32 @@ internal sealed class TrayAppContext : ApplicationContext
         }
 
         menu.Items.Add(themeMenu);
+
+        var fontMenu = new ToolStripMenuItem("Font size");
+        foreach (var option in FontScaleOptions.Options)
+        {
+            var item = new ToolStripMenuItem(option.Label)
+            {
+                Checked = Math.Abs(option.Scale - _options.FontScale) < 0.001,
+                Tag = option.Scale,
+            };
+            item.Click += (_, _) =>
+            {
+                var scale = (double)item.Tag!;
+                _window.SetFontScale(scale);
+                SettingsStore.SaveRuntimeFlags(fontScale: scale);
+                foreach (ToolStripItem sibling in fontMenu.DropDownItems)
+                {
+                    if (sibling is ToolStripMenuItem siblingItem)
+                    {
+                        siblingItem.Checked = ReferenceEquals(siblingItem, item);
+                    }
+                }
+            };
+            fontMenu.DropDownItems.Add(item);
+        }
+
+        menu.Items.Add(fontMenu);
         menu.Items.Add("Open settings file", null, (_, _) => SettingsStore.OpenSettingsFile());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
@@ -498,7 +528,8 @@ internal static class SettingsStore
         bool? startWithWindows = null,
         string? accentColor = null,
         string? backgroundMode = null,
-        string? quotaLayout = null)
+        string? quotaLayout = null,
+        double? fontScale = null)
     {
         Save(settings =>
         {
@@ -508,6 +539,7 @@ internal static class SettingsStore
             if (!string.IsNullOrWhiteSpace(accentColor)) settings.AccentColor = ThemePalette.Resolve(accentColor).Key;
             if (!string.IsNullOrWhiteSpace(backgroundMode)) settings.BackgroundMode = Program.AppOptions.ResolveChoice(backgroundMode, "dark", "dark", "light");
             if (!string.IsNullOrWhiteSpace(quotaLayout)) settings.QuotaLayout = Program.AppOptions.ResolveChoice(quotaLayout, "ring", "ring", "bar");
+            if (fontScale is not null) settings.FontScale = Math.Clamp(fontScale.Value, 0.85, 1.25);
         });
     }
 
@@ -584,6 +616,56 @@ internal static class AppIcon
     }
 }
 
+internal static class VirtualDesktopSupport
+{
+    public static bool IsSupported => OperatingSystem.IsWindows();
+
+    public static bool IsWindowOnCurrentDesktop(IntPtr handle)
+    {
+        if (!IsSupported || handle == IntPtr.Zero)
+        {
+            return true;
+        }
+
+        try
+        {
+            var manager = (IVirtualDesktopManager)new CVirtualDesktopManager();
+            var result = manager.IsWindowOnCurrentVirtualDesktop(handle, out var isOnCurrentDesktop);
+            if (result != 0)
+            {
+                return true;
+            }
+
+            return isOnCurrentDesktop;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    [ComImport]
+    [Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a")]
+    private sealed class CVirtualDesktopManager
+    {
+    }
+
+    [ComImport]
+    [Guid("a5cd92ff-29be-454c-8d04-d82879fb3f1b")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IVirtualDesktopManager
+    {
+        [PreserveSig]
+        int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, [MarshalAs(UnmanagedType.Bool)] out bool onCurrentDesktop);
+
+        [PreserveSig]
+        int GetWindowDesktopId(IntPtr topLevelWindow, out Guid desktopId);
+
+        [PreserveSig]
+        int MoveWindowToDesktop(IntPtr topLevelWindow, ref Guid desktopId);
+    }
+}
+
 internal sealed class AppSettings
 {
     public string? SshHost { get; set; }
@@ -602,7 +684,21 @@ internal sealed class AppSettings
     public string? AccentColor { get; set; }
     public string? BackgroundMode { get; set; }
     public string? QuotaLayout { get; set; }
+    public double? FontScale { get; set; }
     public WindowSettings? Window { get; set; }
+}
+
+internal sealed record FontScaleChoice(string Label, double Scale);
+
+internal static class FontScaleOptions
+{
+    public static readonly FontScaleChoice[] Options =
+    [
+        new("Small", 0.9),
+        new("Normal", 1.0),
+        new("Large", 1.1),
+        new("XL", 1.2),
+    ];
 }
 
 internal sealed record ThemeOption(string Key, string Label, Color Accent);
@@ -659,7 +755,11 @@ internal sealed class FloatingUsageWindow : Form
     private const int HtBottomLeft = 16;
     private const int HtBottomRight = 17;
     private const int WsExTransparent = 0x20;
+    private const int WsExToolWindow = 0x80;
+    private const int WsExAppWindow = 0x40000;
     private const int GwlExStyle = -20;
+    private const int HshellWindowActivated = 4;
+    private const int HshellRudeAppActivated = 0x8004;
 
     private UsageState? _state;
     private bool _loading;
@@ -675,9 +775,13 @@ internal sealed class FloatingUsageWindow : Form
     private Rectangle _layoutButton;
     private Rectangle _toggleButton;
     private Rectangle _refreshButton;
+    private int _shellHookMessage;
     private int _compactHeight = CompactHeight;
     private int _expandedHeight = ExpandedHeight;
+    private double _fontScale;
     private ThemeOption _theme;
+    private bool _shellHookRegistered;
+    private bool _desktopReopenQueued;
 
     public event EventHandler? RefreshRequested;
 
@@ -698,8 +802,22 @@ internal sealed class FloatingUsageWindow : Form
         _clickThrough = options.ClickThrough;
         _lightMode = StringComparer.OrdinalIgnoreCase.Equals(options.BackgroundMode, "light");
         _barLayout = StringComparer.OrdinalIgnoreCase.Equals(options.QuotaLayout, "bar");
+        _fontScale = options.FontScale;
         _compactHeight = Math.Max(CompactHeight, Height);
         _expandedHeight = Math.Max(ExpandedHeight, Height);
+    }
+
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= WsExToolWindow;
+            cp.ExStyle &= ~WsExAppWindow;
+            return cp;
+        }
     }
 
     private static Point ResolveLocation(Program.AppOptions options)
@@ -751,6 +869,21 @@ internal sealed class FloatingUsageWindow : Form
     {
         _theme = theme;
         Invalidate();
+    }
+
+    public void SetFontScale(double scale)
+    {
+        _fontScale = Math.Clamp(scale, 0.85, 1.25);
+        Invalidate();
+    }
+
+    public void ReopenOnCurrentVirtualDesktop()
+    {
+        var bounds = Bounds;
+        Hide();
+        Bounds = bounds;
+        Show();
+        ApplyClickThrough();
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -822,6 +955,19 @@ internal sealed class FloatingUsageWindow : Form
     {
         base.OnShown(e);
         ApplyClickThrough();
+        RegisterShellHook();
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        RegisterShellHook();
+    }
+
+    protected override void OnHandleDestroyed(EventArgs e)
+    {
+        UnregisterShellHook();
+        base.OnHandleDestroyed(e);
     }
 
     protected override void OnResize(EventArgs e)
@@ -841,6 +987,18 @@ internal sealed class FloatingUsageWindow : Form
 
     protected override void WndProc(ref Message m)
     {
+        if (_shellHookMessage != 0 && m.Msg == _shellHookMessage)
+        {
+            var eventCode = m.WParam.ToInt32();
+            if (eventCode is HshellWindowActivated or HshellRudeAppActivated)
+            {
+                QueueReopenOnCurrentVirtualDesktop();
+            }
+
+            base.WndProc(ref m);
+            return;
+        }
+
         if (m.Msg == WmNcHitTest && !_clickThrough)
         {
             base.WndProc(ref m);
@@ -863,6 +1021,52 @@ internal sealed class FloatingUsageWindow : Form
         }
 
         base.WndProc(ref m);
+    }
+
+    private void RegisterShellHook()
+    {
+        if (!OperatingSystem.IsWindows() || !IsHandleCreated || _shellHookRegistered)
+        {
+            return;
+        }
+
+        _shellHookMessage = RegisterWindowMessage("SHELLHOOK");
+        _shellHookRegistered = _shellHookMessage != 0 && RegisterShellHookWindow(Handle);
+    }
+
+    private void UnregisterShellHook()
+    {
+        if (!OperatingSystem.IsWindows() || !_shellHookRegistered || !IsHandleCreated)
+        {
+            return;
+        }
+
+        _ = DeregisterShellHookWindow(Handle);
+        _shellHookRegistered = false;
+    }
+
+    private void QueueReopenOnCurrentVirtualDesktop()
+    {
+        if (_desktopReopenQueued || !Visible || !IsHandleCreated || !VirtualDesktopSupport.IsSupported)
+        {
+            return;
+        }
+
+        _desktopReopenQueued = true;
+        BeginInvoke((MethodInvoker)(() =>
+        {
+            try
+            {
+                if (Visible && IsHandleCreated && !VirtualDesktopSupport.IsWindowOnCurrentDesktop(Handle))
+                {
+                    ReopenOnCurrentVirtualDesktop();
+                }
+            }
+            finally
+            {
+                _desktopReopenQueued = false;
+            }
+        }));
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -914,38 +1118,61 @@ internal sealed class FloatingUsageWindow : Form
 
     private void DrawHeader(Graphics g)
     {
-        using var titleFont = new Font("Segoe UI Semibold", 12f);
-        using var metaFont = new Font("Segoe UI", 8.5f);
+        using var titleFont = UiFont("Segoe UI Semibold", 12f);
+        using var metaFont = UiFont("Segoe UI", 8.5f);
+        using var buttonFont = UiFont("Segoe UI Semibold", 8.5f);
         using var titleBrush = new SolidBrush(PrimaryTextColor());
         using var metaBrush = new SolidBrush(MutedTextColor());
 
         var buttonY = 14;
         var gap = 6;
-        _refreshButton = new Rectangle(Width - 82, buttonY, 64, 26);
-        _toggleButton = new Rectangle(_refreshButton.Left - 72 - gap, buttonY, 72, 26);
-        _layoutButton = new Rectangle(_toggleButton.Left - 52 - gap, buttonY, 52, 26);
-        _modeButton = new Rectangle(_layoutButton.Left - 56 - gap, buttonY, 56, 26);
+        var buttonHeight = Math.Max(26, (int)Math.Ceiling(26 * _fontScale));
+        var modeLabel = _lightMode ? "Dark" : "Light";
+        var layoutLabel = _barLayout ? "Ring" : "Bar";
+        var tokenLabel = _expanded ? "Hide" : "Tokens";
+        const string refreshLabel = "Refresh";
+        var refreshWidth = HeaderButtonWidth(g, refreshLabel, buttonFont, 64);
+        var tokenWidth = HeaderButtonWidth(g, tokenLabel, buttonFont, 72);
+        var layoutWidth = HeaderButtonWidth(g, layoutLabel, buttonFont, 52);
+        var modeWidth = HeaderButtonWidth(g, modeLabel, buttonFont, 56);
+        _refreshButton = new Rectangle(Width - refreshWidth - 18, buttonY, refreshWidth, buttonHeight);
+        _toggleButton = new Rectangle(_refreshButton.Left - tokenWidth - gap, buttonY, tokenWidth, buttonHeight);
+        _layoutButton = new Rectangle(_toggleButton.Left - layoutWidth - gap, buttonY, layoutWidth, buttonHeight);
+        _modeButton = new Rectangle(_layoutButton.Left - modeWidth - gap, buttonY, modeWidth, buttonHeight);
 
-        var titleWidth = Math.Max(38, _modeButton.Left - 26);
-        g.DrawString(TrimToWidth(g, "Codex Usage", titleFont, titleWidth), titleFont, titleBrush, 18, 14);
-        g.DrawString(_stale ? "STALE" : _loading ? "SYNC" : "LIVE", metaFont, metaBrush, 18, 42);
+        var titleWidth = Math.Max(0, _modeButton.Left - 28);
+        if (titleWidth > 22)
+        {
+            g.DrawString(TrimToWidth(g, "Codex Usage", titleFont, titleWidth), titleFont, titleBrush, 18, 14);
+        }
+        g.DrawString(_stale ? "STALE" : _loading ? "SYNC" : "LIVE", metaFont, metaBrush, 18, buttonY + buttonHeight + 2);
 
-        DrawHeaderButton(g, _modeButton, _lightMode ? "Dark" : "Light");
-        DrawHeaderButton(g, _layoutButton, _barLayout ? "Ring" : "Bar");
-        DrawHeaderButton(g, _toggleButton, _expanded ? "Hide" : "Tokens");
-        DrawHeaderButton(g, _refreshButton, "Refresh");
+        DrawHeaderButton(g, _modeButton, modeLabel, buttonFont);
+        DrawHeaderButton(g, _layoutButton, layoutLabel, buttonFont);
+        DrawHeaderButton(g, _toggleButton, tokenLabel, buttonFont);
+        DrawHeaderButton(g, _refreshButton, refreshLabel, buttonFont);
     }
 
-    private void DrawHeaderButton(Graphics g, Rectangle bounds, string label)
+    private void DrawHeaderButton(Graphics g, Rectangle bounds, string label, Font buttonFont)
     {
         using var buttonBrush = new SolidBrush(_lightMode ? Color.FromArgb(232, 241, 246) : Color.FromArgb(32, 58, 78));
         using var buttonBorder = new Pen(ThemePalette.WithAlpha(_theme.Accent, _lightMode ? 190 : 160), 1);
-        using var buttonText = new SolidBrush(_lightMode ? Color.FromArgb(24, 45, 58) : ThemePalette.WithAlpha(_theme.Accent, 245));
-        using var buttonFont = new Font("Segoe UI Semibold", 8.5f);
         g.FillRoundedRectangle(buttonBrush, bounds, 6);
         g.DrawRoundedRectangle(buttonBorder, bounds, 6);
-        var labelSize = g.MeasureString(label, buttonFont);
-        g.DrawString(label, buttonFont, buttonText, bounds.Left + (bounds.Width - labelSize.Width) / 2, bounds.Top + 5);
+        var textColor = _lightMode ? Color.FromArgb(24, 45, 58) : ThemePalette.WithAlpha(_theme.Accent, 245);
+        TextRenderer.DrawText(
+            g,
+            label,
+            buttonFont,
+            bounds,
+            textColor,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+    }
+
+    private int HeaderButtonWidth(Graphics g, string label, Font font, int minimum)
+    {
+        var measured = g.MeasureString(label, font);
+        return Math.Max(minimum, (int)Math.Ceiling(measured.Width + 20));
     }
 
     private void DrawQuotaPanel(Graphics g, UsageState state)
@@ -979,9 +1206,9 @@ internal sealed class FloatingUsageWindow : Form
         g.DrawArc(track, circle, -90, 360);
         g.DrawArc(fill, circle, -90, (float)(360 * percent / 100.0));
 
-        using var labelFont = new Font("Segoe UI Semibold", 10f);
-        using var valueFont = new Font("Segoe UI Semibold", 17f);
-        using var smallFont = new Font("Segoe UI", 8.5f);
+        using var labelFont = UiFont("Segoe UI Semibold", 10f);
+        using var valueFont = UiFont("Segoe UI Semibold", 17f);
+        using var smallFont = UiFont("Segoe UI", 8.5f);
         using var titleBrush = new SolidBrush(PrimaryTextColor());
         using var valueBrush = new SolidBrush(PrimaryTextColor());
         using var mutedBrush = new SolidBrush(MutedTextColor());
@@ -1003,9 +1230,9 @@ internal sealed class FloatingUsageWindow : Form
         var percent = quota.Available && quota.RemainingPercent is not null
             ? Math.Clamp(quota.RemainingPercent.Value, 0, 100)
             : 0;
-        using var labelFont = new Font("Segoe UI Semibold", 9.5f);
-        using var valueFont = new Font("Segoe UI Semibold", 13.5f);
-        using var smallFont = new Font("Segoe UI", 8f);
+        using var labelFont = UiFont("Segoe UI Semibold", 9.5f);
+        using var valueFont = UiFont("Segoe UI Semibold", 13.5f);
+        using var smallFont = UiFont("Segoe UI", 8f);
         using var titleBrush = new SolidBrush(PrimaryTextColor());
         using var valueBrush = new SolidBrush(PrimaryTextColor());
         using var mutedBrush = new SolidBrush(MutedTextColor());
@@ -1050,8 +1277,8 @@ internal sealed class FloatingUsageWindow : Form
 
         using var line = new Pen(TrackColor(), 1);
         g.DrawLine(line, 20, y - 12, Width - 20, y - 12);
-        using var headFont = new Font("Segoe UI Semibold", 8.5f);
-        using var rowFont = new Font("Segoe UI", 8.5f);
+        using var headFont = UiFont("Segoe UI Semibold", 8.5f);
+        using var rowFont = UiFont("Segoe UI", 8.5f);
         using var headBrush = new SolidBrush(ThemePalette.WithAlpha(_theme.Accent, 220));
         using var rowBrush = new SolidBrush(PrimaryTextColor());
         using var mutedBrush = new SolidBrush(MutedTextColor());
@@ -1102,7 +1329,7 @@ internal sealed class FloatingUsageWindow : Form
 
     private void DrawFooter(Graphics g, UsageState state)
     {
-        using var font = new Font("Segoe UI", 8f);
+        using var font = UiFont("Segoe UI", 8f);
         using var brush = new SolidBrush(_error is null ? MutedTextColor() : Color.FromArgb(210, 106, 35));
         var text = _error is null
             ? $"Refresh {UsageFormatter.FormatTime(state.LastSuccessAt)}  Event {UsageFormatter.FormatTime(state.LastEventAt)}"
@@ -1211,10 +1438,21 @@ internal sealed class FloatingUsageWindow : Form
     [DllImport("user32.dll")]
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int RegisterWindowMessage(string lpString);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterShellHookWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeregisterShellHookWindow(IntPtr hWnd);
+
     private void DrawCenteredMessage(Graphics g, string message, string? detail)
     {
-        using var font = new Font("Segoe UI Semibold", 10f);
-        using var detailFont = new Font("Segoe UI", 8.5f);
+        using var font = UiFont("Segoe UI Semibold", 10f);
+        using var detailFont = UiFont("Segoe UI", 8.5f);
         using var brush = new SolidBrush(PrimaryTextColor());
         using var muted = new SolidBrush(MutedTextColor());
         g.DrawString(message, font, brush, 20, 82);
@@ -1223,6 +1461,8 @@ internal sealed class FloatingUsageWindow : Form
             g.DrawString(TrimToWidth(g, detail, detailFont, Width - 40), detailFont, muted, 20, 110);
         }
     }
+
+    private Font UiFont(string family, float size) => new(family, Math.Max(6f, size * (float)_fontScale));
 
     private static string TrimToWidth(Graphics g, string text, Font font, int width)
     {

@@ -618,6 +618,8 @@ internal static class AppIcon
 
 internal static class VirtualDesktopSupport
 {
+    private static readonly Guid VirtualDesktopManagerClsid = new("aa509086-5ca9-4c25-8f95-589d3c07b48a");
+
     public static bool IsSupported => OperatingSystem.IsWindows();
 
     public static bool IsWindowOnCurrentDesktop(IntPtr handle)
@@ -629,7 +631,18 @@ internal static class VirtualDesktopSupport
 
         try
         {
-            var manager = (IVirtualDesktopManager)new CVirtualDesktopManager();
+            var managerType = Type.GetTypeFromCLSID(VirtualDesktopManagerClsid);
+            if (managerType is null)
+            {
+                return true;
+            }
+
+            var managerObject = Activator.CreateInstance(managerType);
+            if (managerObject is not IVirtualDesktopManager manager)
+            {
+                return true;
+            }
+
             var result = manager.IsWindowOnCurrentVirtualDesktop(handle, out var isOnCurrentDesktop);
             if (result != 0)
             {
@@ -642,12 +655,6 @@ internal static class VirtualDesktopSupport
         {
             return true;
         }
-    }
-
-    [ComImport]
-    [Guid("aa509086-5ca9-4c25-8f95-589d3c07b48a")]
-    private sealed class CVirtualDesktopManager
-    {
     }
 
     [ComImport]

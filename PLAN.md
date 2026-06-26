@@ -350,7 +350,16 @@ Windows 端只依赖这个 contract。字段名必须稳定。
 
 ## 7. Windows 配置文件
 
-路径：
+首版支持两个配置位置：
+
+```text
+.\settings.json
+CodexUsageToolbar.exe 同目录\settings.json
+```
+
+如果两个都存在，优先读取当前工作目录下的 `settings.json`。命令行参数和环境变量可以覆盖配置文件。
+
+长期路径：
 
 ```text
 %LOCALAPPDATA%\CodexUsageToolbar\settings.json
@@ -360,29 +369,38 @@ Windows 端只依赖这个 contract。字段名必须稳定。
 
 ```json
 {
-  "sshHost": "codex-vm",
+  "sshHost": "jiaming@192.168.32.123",
   "remoteCommand": "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json",
+  "identityFile": null,
+  "port": 22,
   "pollIntervalSeconds": 60,
-  "expandedPollIntervalSeconds": 30,
+  "connectTimeoutSeconds": 3,
   "commandTimeoutSeconds": 5,
-  "staleAfterSeconds": 300,
-  "opacity": 0.92,
+  "opacity": 0.95,
   "alwaysOnTop": true,
-  "clickThrough": false,
-  "startMinimizedToTray": true,
+  "startHidden": false,
   "window": {
-    "x": 1600,
-    "y": 80,
-    "width": 340,
-    "height": 180,
-    "mode": "compact"
-  },
-  "thresholds": {
-    "fiveHourRemainingWarnPercent": 15,
-    "weeklyRemainingWarnPercent": 20
+    "x": null,
+    "y": null,
+    "width": 390,
+    "height": 210
   }
 }
 ```
+
+当前有效配置项：
+
+- `sshHost`：SSH 目标，例如 `jiaming@192.168.32.123` 或 `codex-vm`。
+- `remoteCommand`：Ubuntu exporter 命令。
+- `identityFile`：可选 SSH key 路径。
+- `port`：SSH 端口。
+- `pollIntervalSeconds`：自动刷新间隔，程序限制在 5 到 3600 秒。
+- `connectTimeoutSeconds`：SSH 连接超时，程序限制在 1 到 60 秒。
+- `commandTimeoutSeconds`：远程命令总超时，程序限制在 1 到 120 秒。
+- `opacity`：窗口透明度，程序限制在 0.35 到 1.0。
+- `alwaysOnTop`：悬浮窗是否置顶。
+- `startHidden`：启动时只进托盘，不显示悬浮窗。
+- `window.x/y/width/height`：窗口初始位置和尺寸；`x/y` 为 `null` 时自动放到屏幕右上角。
 
 ## 8. 本地缓存与日志
 
@@ -762,6 +780,8 @@ Last refresh 14:23
 
 ### Phase 3 — Tray + compact floating window
 
+状态：已完成。
+
 目标：实现最小可用桌面悬浮显示。
 
 交付：
@@ -772,6 +792,22 @@ Last refresh 14:23
 - 手动 refresh。
 - last-good 缓存。
 - VM 离线时显示 stale。
+- 深色科技感 compact UI。
+- token 横向 bar。
+- cache hit rate 圆环。
+
+启动时可用参数或环境变量指定 SSH 目标：
+
+```powershell
+.\CodexUsageToolbar.exe --ssh-host jiaming@192.168.32.123
+```
+
+或：
+
+```powershell
+$env:CODEX_USAGE_SSH_HOST = "jiaming@192.168.32.123"
+.\CodexUsageToolbar.exe
+```
 
 验收：
 

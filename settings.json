@@ -1,0 +1,18 @@
+{
+  "sshHost": "jiaming@192.168.32.123",
+  "remoteCommand": "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json",
+  "identityFile": null,
+  "port": 22,
+  "pollIntervalSeconds": 60,
+  "connectTimeoutSeconds": 3,
+  "commandTimeoutSeconds": 5,
+  "opacity": 0.95,
+  "alwaysOnTop": true,
+  "startHidden": false,
+  "window": {
+    "x": null,
+    "y": null,
+    "width": 390,
+    "height": 210
+  }
+}

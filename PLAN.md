@@ -32,8 +32,9 @@ Week 剩 77% · 重置 Tue 00:00
 
 只统计 `Codex`，不混入 Claude、Gemini、OpenCode 或其他 app。
 
-必须显示四个时间窗口：
+必须显示五个时间窗口：
 
+- 当天
 - 1 天
 - 7 天
 - 14 天
@@ -51,6 +52,7 @@ Week 剩 77% · 重置 Tue 00:00
 
 ```text
 Range   Tokens   Hit      Hit%    Req   Cost
+Today   512k     250k     48.8%   42    $1.31
 1d      649k     320k     49.3%   64    $1.82
 7d      4.6M     2.4M     52.1%   390   $13.92
 14d     8.9M     4.8M     53.9%   812   $27.40
@@ -223,7 +225,7 @@ ssh -o BatchMode=yes `
     -o ConnectTimeout=3 `
     -o ServerAliveInterval=10 `
     codex-vm `
-    "~/.local/bin/ccswitch-export codex --windows 1d,7d,14d,30d --json"
+    "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json"
 ```
 
 建议在 Windows `%USERPROFILE%\.ssh\config` 里配置：
@@ -243,7 +245,7 @@ Windows 程序只保存 `Host alias` 和远程命令，不保存密码。
 Ubuntu `authorized_keys` 可限制该 key 只能执行 exporter：
 
 ```text
-command="/home/ubuntu/.local/bin/ccswitch-export codex --windows 1d,7d,14d,30d --json",no-port-forwarding,no-X11-forwarding,no-agent-forwarding ssh-ed25519 AAAA...
+command="/home/ubuntu/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json",no-port-forwarding,no-X11-forwarding,no-agent-forwarding ssh-ed25519 AAAA...
 ```
 
 如果使用 forced command，Windows 端实际只需要：
@@ -290,6 +292,13 @@ Windows 端只依赖这个 contract。字段名必须稳定。
     }
   },
   "tokens": {
+    "today": {
+      "total_tokens": 512000,
+      "hit_tokens": 250000,
+      "hit_rate": 0.488,
+      "requests": 42,
+      "total_cost_usd": 1.31
+    },
     "1d": {
       "total_tokens": 649000,
       "hit_tokens": 320000,
@@ -331,7 +340,7 @@ Windows 端只依赖这个 contract。字段名必须稳定。
 ### 6.1 Contract 规则
 
 - `app` 必须是 `codex`。
-- token 窗口必须包含 `1d`、`7d`、`14d`、`30d`。
+- token 窗口必须包含 `today`、`1d`、`7d`、`14d`、`30d`。
 - `hit_rate` 用 0 到 1 的小数，Windows 负责格式化成百分比。
 - `total_cost_usd` 用数字，不带 `$`。
 - 时间使用 ISO 8601。
@@ -352,7 +361,7 @@ Windows 端只依赖这个 contract。字段名必须稳定。
 ```json
 {
   "sshHost": "codex-vm",
-  "remoteCommand": "~/.local/bin/ccswitch-export codex --windows 1d,7d,14d,30d --json",
+  "remoteCommand": "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json",
   "pollIntervalSeconds": 60,
   "expandedPollIntervalSeconds": 30,
   "commandTimeoutSeconds": 5,
@@ -448,6 +457,7 @@ Codex Usage                         ↻ 14:23
 Week  剩 77%     重置 Tue 00:00
 
 Range   Tokens   Hit      Hit%    Req   Cost
+Today   512k     250k     48.8%   42    $1.31
 1d      649k     320k     49.3%   64    $1.82
 7d      4.6M     2.4M     52.1%   390   $13.92
 14d     8.9M     4.8M     53.9%   812   $27.40
@@ -650,22 +660,74 @@ MVP 不做多 provider tab。
 
 ### Phase 1 — JSON contract 验证
 
+状态：已完成。
+
 目标：确认 Ubuntu exporter 可以稳定返回 Windows 所需字段。
 
 交付：
 
-- `ccswitch-export codex --windows 1d,7d,14d,30d --json`
+- `ccswitch-export codex --windows today,1d,7d,14d,30d --json`
+- `scripts/ccswitch-export`
+- `scripts/install-ubuntu-exporter.sh`
 - 手工 SSH 可拿到 JSON。
-- JSON 包含 quota、1d/7d/14d/30d token、hit、hit rate、request、cost。
+- JSON 包含 quota、today/1d/7d/14d/30d token、hit、hit rate、request、cost。
 - 只包含 Codex。
 
 验收：
 
+先在 Ubuntu VM 本地验证 exporter：
+
+```bash
+bash scripts/check-p1-exporter.sh
+```
+
+如果 exporter 不在 `~/.local/bin/ccswitch-export`，传入实际路径：
+
+```bash
+bash scripts/check-p1-exporter.sh /actual/path/to/ccswitch-export
+```
+
+安装仓库内 exporter：
+
+```bash
+bash scripts/install-ubuntu-exporter.sh
+```
+
+Ubuntu 本地通过后，再从 Windows 验证 SSH 通道：
+
 ```powershell
-ssh codex-vm "~/.local/bin/ccswitch-export codex --windows 1d,7d,14d,30d --json"
+ssh codex-vm "~/.local/bin/ccswitch-export codex --windows today,1d,7d,14d,30d --json"
 ```
 
 输出能被 `jq` 或 `ConvertFrom-Json` 正常解析。
+
+仓库提供轻量验证脚本：
+
+```powershell
+.\scripts\Validate-P1Exporter.ps1
+```
+
+脚本只调用 Windows `ssh.exe` 和 PowerShell `ConvertFrom-Json`，不安装依赖；验证通过时输出 `P1 exporter contract OK`。
+
+如果还没有配置 `codex-vm` SSH alias，可以直接传 VM 地址：
+
+```powershell
+.\scripts\Validate-P1Exporter.ps1 -SshHost ubuntu@192.168.x.x -IdentityFile "$HOME\.ssh\codex_usage_vm_ed25519"
+```
+
+如果 Ubuntu 提示符是 `jiaming@jiaming-VM-Ubuntu:~$`，可以先尝试：
+
+```powershell
+.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@jiaming-VM-Ubuntu
+```
+
+如果 SSH 已通但提示 `~/.local/bin/ccswitch-export` 不存在，先运行诊断：
+
+```powershell
+.\scripts\Validate-P1Exporter.ps1 -SshHost jiaming@192.168.32.123 -CheckOnly
+```
+
+然后根据实际 exporter 路径改用 `-RemoteCommand`，或先在 Ubuntu 侧创建 `~/.local/bin/ccswitch-export`。
 
 ### Phase 2 — Windows console prototype
 
@@ -682,6 +744,7 @@ CodexUsageToolbar.exe --once
 ```text
 5h left 19%, reset 17:00
 Week left 77%, reset Tue 00:00
+Today 512k tokens, hit 250k, hit 48.8%, req 42, cost $1.31
 1d 649k tokens, hit 320k, hit 49.3%, req 64, cost $1.82
 7d 4.6M tokens, hit 2.4M, hit 52.1%, req 390, cost $13.92
 14d ...
@@ -730,7 +793,7 @@ Last refresh 14:23
 
 验收：
 
-- 1d/7d/14d/30d 全部显示。
+- today/1d/7d/14d/30d 全部显示。
 - 位置和模式重启后保持。
 - 设置变更后可生效。
 
@@ -925,7 +988,7 @@ MVP 完成标准：
 - Windows 桌面显示 Codex weekly 剩余额度。
 - 显示 5h / weekly 重置时间。
 - 显示本工具最后刷新时间。
-- 显示 Codex 1d / 7d / 14d / 30d token 消耗。
+- 显示 Codex today / 1d / 7d / 14d / 30d token 消耗。
 - 显示命中、命中率、请求数、总成本。
 - 所有 token/cost 数据只统计 Codex。
 - SSH 失败不崩溃。
@@ -991,7 +1054,7 @@ Windows 端实现为：
 ```text
 cc-switch 3.16.1 on Ubuntu
         ↓
-ccswitch-export codex --windows 1d,7d,14d,30d --json
+ccswitch-export codex --windows today,1d,7d,14d,30d --json
         ↓ SSH
 Windows CodexUsageToolbar.exe
         ↓

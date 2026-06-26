@@ -379,11 +379,13 @@ CodexUsageToolbar.exe 同目录\settings.json
   "opacity": 0.95,
   "alwaysOnTop": true,
   "startHidden": false,
+  "clickThrough": false,
+  "startWithWindows": false,
   "window": {
     "x": null,
     "y": null,
     "width": 390,
-    "height": 210
+    "height": 170
   }
 }
 ```
@@ -400,6 +402,8 @@ CodexUsageToolbar.exe 同目录\settings.json
 - `opacity`：窗口透明度，程序限制在 0.35 到 1.0。
 - `alwaysOnTop`：悬浮窗是否置顶。
 - `startHidden`：启动时只进托盘，不显示悬浮窗。
+- `clickThrough`：悬浮窗是否点击穿透，也可在托盘右键菜单切换。
+- `startWithWindows`：是否写入 HKCU Run 开机启动，也可在托盘右键菜单切换。
 - `window.x/y/width/height`：窗口初始位置和尺寸；`x/y` 为 `null` 时自动放到屏幕右上角。
 
 ## 8. 本地缓存与日志
@@ -818,6 +822,8 @@ $env:CODEX_USAGE_SSH_HOST = "jiaming@192.168.32.123"
 
 ### Phase 4 — Expanded view + 设置
 
+状态：已完成。
+
 目标：补齐完整数据表和基本配置。
 
 交付：
@@ -828,6 +834,11 @@ $env:CODEX_USAGE_SSH_HOST = "jiaming@192.168.32.123"
 - 窗口位置保存。
 - AlwaysOnTop 开关。
 - 点击穿透开关。
+- 点击穿透托盘开关。
+- 开机启动托盘开关。
+- compact / expanded 切换按钮。
+- resize 后布局自适应。
+- 悬浮窗边缘拖动调整大小，右下角提供 resize grip 提示。
 
 验收：
 

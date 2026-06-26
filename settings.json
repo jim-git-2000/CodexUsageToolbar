@@ -9,10 +9,12 @@
   "opacity": 0.95,
   "alwaysOnTop": true,
   "startHidden": false,
+  "clickThrough": false,
+  "startWithWindows": false,
   "window": {
     "x": null,
     "y": null,
     "width": 390,
-    "height": 210
+    "height": 170
   }
 }

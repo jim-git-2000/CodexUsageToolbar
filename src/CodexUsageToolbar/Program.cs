@@ -82,7 +82,9 @@ internal static class Program
         int WindowHeight,
         double Opacity,
         bool AlwaysOnTop,
-        bool StartHidden)
+        bool StartHidden,
+        bool ClickThrough,
+        bool StartWithWindows)
     {
         public static string HelpText =>
             """
@@ -116,10 +118,12 @@ internal static class Program
             var windowX = settings.Window?.X;
             var windowY = settings.Window?.Y;
             var windowWidth = settings.Window?.Width ?? 390;
-            var windowHeight = settings.Window?.Height ?? 210;
+            var windowHeight = settings.Window?.Height ?? 170;
             var opacity = settings.Opacity ?? 0.95;
             var alwaysOnTop = settings.AlwaysOnTop ?? true;
             var startHidden = settings.StartHidden ?? false;
+            var clickThrough = settings.ClickThrough ?? false;
+            var startWithWindows = settings.StartWithWindows ?? false;
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -186,7 +190,9 @@ internal static class Program
                 windowHeight,
                 opacity,
                 alwaysOnTop,
-                startHidden);
+                startHidden,
+                clickThrough,
+                startWithWindows);
         }
 
         private static string RequireValue(string[] args, ref int index, string name)
@@ -218,6 +224,9 @@ internal sealed class TrayAppContext : ApplicationContext
     private readonly NotifyIcon _trayIcon;
     private readonly FloatingUsageWindow _window;
     private readonly System.Windows.Forms.Timer _timer;
+    private ToolStripMenuItem? _clickThroughItem;
+    private ToolStripMenuItem? _startWithWindowsItem;
+    private ToolStripMenuItem? _alwaysOnTopItem;
     private bool _refreshing;
 
     public TrayAppContext(Program.AppOptions options)
@@ -229,9 +238,17 @@ internal sealed class TrayAppContext : ApplicationContext
             Icon = SystemIcons.Application,
             Text = "Codex Usage Toolbar",
             Visible = true,
-            ContextMenuStrip = BuildMenu(),
         };
+        _trayIcon.ContextMenuStrip = BuildMenu();
         _trayIcon.DoubleClick += (_, _) => ToggleWindow();
+        if (options.StartWithWindows && !StartupManager.IsEnabled())
+        {
+            StartupManager.SetEnabled(true);
+            if (_startWithWindowsItem is not null)
+            {
+                _startWithWindowsItem.Checked = true;
+            }
+        }
 
         _timer = new System.Windows.Forms.Timer { Interval = options.PollIntervalSeconds * 1000 };
         _timer.Tick += async (_, _) => await RefreshAsync();
@@ -250,6 +267,31 @@ internal sealed class TrayAppContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add("Show / Hide", null, (_, _) => ToggleWindow());
         menu.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync(force: true));
+        menu.Items.Add(new ToolStripSeparator());
+        _clickThroughItem = new ToolStripMenuItem("Click-through") { CheckOnClick = true, Checked = _options.ClickThrough };
+        _clickThroughItem.CheckedChanged += (_, _) =>
+        {
+            _window.SetClickThrough(_clickThroughItem.Checked);
+            SettingsStore.SaveRuntimeFlags(clickThrough: _clickThroughItem.Checked);
+        };
+        menu.Items.Add(_clickThroughItem);
+
+        _alwaysOnTopItem = new ToolStripMenuItem("Always on top") { CheckOnClick = true, Checked = _options.AlwaysOnTop };
+        _alwaysOnTopItem.CheckedChanged += (_, _) =>
+        {
+            _window.TopMost = _alwaysOnTopItem.Checked;
+            SettingsStore.SaveRuntimeFlags(alwaysOnTop: _alwaysOnTopItem.Checked);
+        };
+        menu.Items.Add(_alwaysOnTopItem);
+
+        _startWithWindowsItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = StartupManager.IsEnabled() };
+        _startWithWindowsItem.CheckedChanged += (_, _) =>
+        {
+            StartupManager.SetEnabled(_startWithWindowsItem.Checked);
+            SettingsStore.SaveRuntimeFlags(startWithWindows: _startWithWindowsItem.Checked);
+        };
+        menu.Items.Add(_startWithWindowsItem);
+        menu.Items.Add("Open settings file", null, (_, _) => SettingsStore.OpenSettingsFile());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
         return menu;
@@ -317,6 +359,7 @@ internal sealed class TrayAppContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         _timer.Stop();
+        _window.SaveWindowSettings();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _window.Dispose();
@@ -326,6 +369,8 @@ internal sealed class TrayAppContext : ApplicationContext
 
 internal static class SettingsStore
 {
+    public static string PreferredSettingsPath => Path.Combine(AppContext.BaseDirectory, "settings.json");
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -367,6 +412,88 @@ internal static class SettingsStore
             yield return exeSettings;
         }
     }
+
+    public static void OpenSettingsFile()
+    {
+        var path = GetCandidatePaths().FirstOrDefault(File.Exists) ?? PreferredSettingsPath;
+        if (!File.Exists(path))
+        {
+            File.WriteAllText(path, JsonSerializer.Serialize(new AppSettings(), JsonOptions), Encoding.UTF8);
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = path,
+            UseShellExecute = true,
+        });
+    }
+
+    public static void SaveWindowBounds(Rectangle bounds)
+    {
+        Save(settings =>
+        {
+            settings.Window ??= new WindowSettings();
+            settings.Window.X = bounds.X;
+            settings.Window.Y = bounds.Y;
+            settings.Window.Width = bounds.Width;
+            settings.Window.Height = bounds.Height;
+        });
+    }
+
+    public static void SaveRuntimeFlags(bool? clickThrough = null, bool? alwaysOnTop = null, bool? startWithWindows = null)
+    {
+        Save(settings =>
+        {
+            if (clickThrough is not null) settings.ClickThrough = clickThrough;
+            if (alwaysOnTop is not null) settings.AlwaysOnTop = alwaysOnTop;
+            if (startWithWindows is not null) settings.StartWithWindows = startWithWindows;
+        });
+    }
+
+    private static void Save(Action<AppSettings> update)
+    {
+        var path = GetCandidatePaths().FirstOrDefault(File.Exists) ?? PreferredSettingsPath;
+        var settings = Load();
+        update(settings);
+        var options = new JsonSerializerOptions(JsonOptions) { WriteIndented = true };
+        File.WriteAllText(path, JsonSerializer.Serialize(settings, options), Encoding.UTF8);
+    }
+}
+
+internal static class StartupManager
+{
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string ValueName = "CodexUsageToolbar";
+
+    public static bool IsEnabled()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
+        return key?.GetValue(ValueName) is string;
+    }
+
+    public static void SetEnabled(bool enabled)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(RunKeyPath);
+        if (enabled)
+        {
+            var exe = Environment.ProcessPath ?? Application.ExecutablePath;
+            key.SetValue(ValueName, $"\"{exe}\"");
+        }
+        else
+        {
+            key.DeleteValue(ValueName, throwOnMissingValue: false);
+        }
+    }
 }
 
 internal sealed class AppSettings
@@ -382,6 +509,8 @@ internal sealed class AppSettings
     public double? Opacity { get; set; }
     public bool? AlwaysOnTop { get; set; }
     public bool? StartHidden { get; set; }
+    public bool? ClickThrough { get; set; }
+    public bool? StartWithWindows { get; set; }
     public WindowSettings? Window { get; set; }
 }
 
@@ -395,12 +524,30 @@ internal sealed class WindowSettings
 
 internal sealed class FloatingUsageWindow : Form
 {
+    private const int CompactHeight = 170;
+    private const int ExpandedHeight = 360;
+    private const int ResizeGrip = 8;
+    private const int WmNcHitTest = 0x0084;
+    private const int HtLeft = 10;
+    private const int HtRight = 11;
+    private const int HtTop = 12;
+    private const int HtTopLeft = 13;
+    private const int HtTopRight = 14;
+    private const int HtBottom = 15;
+    private const int HtBottomLeft = 16;
+    private const int HtBottomRight = 17;
+    private const int WsExTransparent = 0x20;
+    private const int GwlExStyle = -20;
+
     private UsageState? _state;
     private bool _loading;
     private bool _stale;
     private string? _error;
     private Point _dragStart;
     private bool _dragging;
+    private bool _expanded;
+    private bool _clickThrough;
+    private Rectangle _toggleButton;
 
     public FloatingUsageWindow(Program.AppOptions options)
     {
@@ -408,12 +555,14 @@ internal sealed class FloatingUsageWindow : Form
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         Size = new Size(options.WindowWidth, options.WindowHeight);
+        MinimumSize = new Size(360, CompactHeight);
         TopMost = options.AlwaysOnTop;
         ShowInTaskbar = false;
         DoubleBuffered = true;
         BackColor = Color.FromArgb(9, 14, 24);
         Location = ResolveLocation(options);
         Opacity = options.Opacity;
+        _clickThrough = options.ClickThrough;
     }
 
     private static Point ResolveLocation(Program.AppOptions options)
@@ -450,9 +599,31 @@ internal sealed class FloatingUsageWindow : Form
         Invalidate();
     }
 
+    public void SaveWindowSettings()
+    {
+        SettingsStore.SaveWindowBounds(Bounds);
+    }
+
+    public void SetClickThrough(bool enabled)
+    {
+        _clickThrough = enabled;
+        ApplyClickThrough();
+    }
+
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        if (IsInResizeZone(e.Location))
+        {
+            return;
+        }
+
+        if (_toggleButton.Contains(e.Location))
+        {
+            ToggleExpanded();
+            return;
+        }
+
         if (e.Button == MouseButtons.Left)
         {
             _dragging = true;
@@ -468,6 +639,10 @@ internal sealed class FloatingUsageWindow : Form
             Left += e.X - _dragStart.X;
             Top += e.Y - _dragStart.Y;
         }
+        else
+        {
+            Cursor = GetResizeCursor(e.Location);
+        }
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -476,11 +651,56 @@ internal sealed class FloatingUsageWindow : Form
         base.OnMouseUp(e);
     }
 
+    protected override void OnMouseLeave(EventArgs e)
+    {
+        Cursor = Cursors.Default;
+        base.OnMouseLeave(e);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        ApplyClickThrough();
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        Invalidate();
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WmNcHitTest && !_clickThrough)
+        {
+            base.WndProc(ref m);
+            var raw = unchecked((int)m.LParam.ToInt64());
+            var p = PointToClient(new Point((short)(raw & 0xFFFF), (short)(raw >> 16)));
+            var left = p.X <= ResizeGrip;
+            var right = p.X >= Width - ResizeGrip;
+            var top = p.Y <= ResizeGrip;
+            var bottom = p.Y >= Height - ResizeGrip;
+
+            if (left && top) { m.Result = HtTopLeft; return; }
+            if (right && top) { m.Result = HtTopRight; return; }
+            if (left && bottom) { m.Result = HtBottomLeft; return; }
+            if (right && bottom) { m.Result = HtBottomRight; return; }
+            if (left) { m.Result = HtLeft; return; }
+            if (right) { m.Result = HtRight; return; }
+            if (top) { m.Result = HtTop; return; }
+            if (bottom) { m.Result = HtBottom; return; }
+            return;
+        }
+
+        base.WndProc(ref m);
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         DrawBackground(g);
+        DrawResizeHint(g);
         DrawHeader(g);
 
         if (_state is null)
@@ -489,8 +709,12 @@ internal sealed class FloatingUsageWindow : Form
             return;
         }
 
-        DrawQuota(g, _state);
-        DrawTokenBars(g, _state);
+        DrawQuotaPanel(g, _state);
+        if (_expanded)
+        {
+            DrawTokenTable(g, _state);
+        }
+
         DrawFooter(g, _state);
     }
 
@@ -502,6 +726,20 @@ internal sealed class FloatingUsageWindow : Form
         g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
     }
 
+    private void DrawResizeHint(Graphics g)
+    {
+        if (_clickThrough)
+        {
+            return;
+        }
+
+        using var pen = new Pen(Color.FromArgb(95, 90, 215, 230), 1);
+        var x = Width - 18;
+        var y = Height - 18;
+        g.DrawLine(pen, x + 10, y + 2, x + 2, y + 10);
+        g.DrawLine(pen, x + 14, y + 6, x + 6, y + 14);
+    }
+
     private void DrawHeader(Graphics g)
     {
         using var titleFont = new Font("Segoe UI Semibold", 12f);
@@ -510,74 +748,114 @@ internal sealed class FloatingUsageWindow : Form
         using var metaBrush = new SolidBrush(Color.FromArgb(125, 190, 205));
         g.DrawString("Codex Usage", titleFont, titleBrush, 18, 14);
         g.DrawString(_stale ? "STALE" : _loading ? "SYNC" : "LIVE", metaFont, metaBrush, Width - 62, 18);
+        _toggleButton = new Rectangle(Width - 104, 42, 84, 26);
+        using var buttonBrush = new SolidBrush(Color.FromArgb(32, 58, 78));
+        using var buttonBorder = new Pen(Color.FromArgb(90, 215, 230), 1);
+        using var buttonText = new SolidBrush(Color.FromArgb(210, 245, 250));
+        using var buttonFont = new Font("Segoe UI Semibold", 8.5f);
+        g.FillRoundedRectangle(buttonBrush, _toggleButton, 6);
+        g.DrawRoundedRectangle(buttonBorder, _toggleButton, 6);
+        var label = _expanded ? "Hide tokens" : "Tokens";
+        var labelSize = g.MeasureString(label, buttonFont);
+        g.DrawString(label, buttonFont, buttonText, _toggleButton.Left + (_toggleButton.Width - labelSize.Width) / 2, _toggleButton.Top + 5);
     }
 
-    private void DrawQuota(Graphics g, UsageState state)
+    private void DrawQuotaPanel(Graphics g, UsageState state)
     {
-        using var labelFont = new Font("Segoe UI", 8.5f);
-        using var valueFont = new Font("Segoe UI Semibold", 10f);
-        using var muted = new SolidBrush(Color.FromArgb(145, 160, 176));
-        using var text = new SolidBrush(Color.FromArgb(232, 248, 255));
-
-        g.DrawString("5h", labelFont, muted, 20, 46);
-        g.DrawString(UsageFormatter.FormatQuotaForUi(state.Quota.FiveHour), valueFont, text, 46, 43);
-        DrawMiniProgress(g, 115, 50, 70, state.Quota.FiveHour.RemainingPercent);
-
-        g.DrawString("Week", labelFont, muted, 210, 46);
-        g.DrawString(UsageFormatter.FormatQuotaForUi(state.Quota.Weekly), valueFont, text, 252, 43);
-        DrawMiniProgress(g, 320, 50, 48, state.Quota.Weekly.RemainingPercent);
+        var top = 72;
+        var panelHeight = Math.Min(112, Height - 108);
+        var half = (Width - 40) / 2;
+        DrawQuotaCircle(g, new Rectangle(20, top, half - 8, panelHeight), "5h", state.Quota.FiveHour);
+        DrawQuotaCircle(g, new Rectangle(28 + half, top, half - 8, panelHeight), "Week", state.Quota.Weekly);
     }
 
-    private static void DrawMiniProgress(Graphics g, int x, int y, int width, double? value)
+    private static void DrawQuotaCircle(Graphics g, Rectangle bounds, string label, QuotaWindow quota)
     {
-        var percent = Math.Clamp(value ?? 0, 0, 100) / 100.0;
-        using var track = new Pen(Color.FromArgb(45, 80, 100), 5) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        using var fill = new Pen(value is null ? Color.FromArgb(80, 95, 110) : Color.FromArgb(60, 220, 210), 5) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        g.DrawLine(track, x, y, x + width, y);
-        g.DrawLine(fill, x, y, x + (int)(width * percent), y);
+        var diameter = Math.Min(74, Math.Max(54, bounds.Height - 28));
+        var circle = new Rectangle(bounds.Left, bounds.Top + 4, diameter, diameter);
+        var percent = quota.Available && quota.RemainingPercent is not null
+            ? Math.Clamp(quota.RemainingPercent.Value, 0, 100)
+            : 0;
+        using var track = new Pen(Color.FromArgb(38, 62, 80), 8);
+        using var fill = new Pen(quota.Available ? Color.FromArgb(65, 235, 210) : Color.FromArgb(76, 91, 108), 8)
+        {
+            StartCap = LineCap.Round,
+            EndCap = LineCap.Round,
+        };
+        g.DrawArc(track, circle, -90, 360);
+        g.DrawArc(fill, circle, -90, (float)(360 * percent / 100.0));
+
+        using var labelFont = new Font("Segoe UI Semibold", 10f);
+        using var valueFont = new Font("Segoe UI Semibold", 17f);
+        using var smallFont = new Font("Segoe UI", 8.5f);
+        using var titleBrush = new SolidBrush(Color.FromArgb(220, 238, 245));
+        using var valueBrush = new SolidBrush(Color.FromArgb(235, 252, 255));
+        using var mutedBrush = new SolidBrush(Color.FromArgb(140, 160, 174));
+        var textX = circle.Right + 12;
+        g.DrawString(label, labelFont, titleBrush, textX, bounds.Top + 4);
+        g.DrawString(UsageFormatter.FormatQuotaForUi(quota), valueFont, valueBrush, textX, bounds.Top + 26);
+        var reset = quota.Available ? $"Reset {UsageFormatter.FormatTime(quota.ResetAt)}" : "Unavailable";
+        g.DrawString(reset, smallFont, mutedBrush, textX, bounds.Top + 62);
     }
 
-    private void DrawTokenBars(Graphics g, UsageState state)
+    private void DrawTokenTable(Graphics g, UsageState state)
     {
-        var windows = new[] { "today", "1d", "7d", "14d", "30d" };
-        var maxTokens = windows.Max(w => Math.Max(1, state.Tokens[w].TotalTokens));
-        var y = 76;
-        foreach (var window in windows)
+        var y = 194;
+        if (Height < 295)
+        {
+            return;
+        }
+
+        using var line = new Pen(Color.FromArgb(36, 70, 90), 1);
+        g.DrawLine(line, 20, y - 12, Width - 20, y - 12);
+        using var headFont = new Font("Segoe UI Semibold", 8.5f);
+        using var rowFont = new Font("Segoe UI", 8.5f);
+        using var headBrush = new SolidBrush(Color.FromArgb(130, 205, 216));
+        using var rowBrush = new SolidBrush(Color.FromArgb(222, 235, 240));
+        using var mutedBrush = new SolidBrush(Color.FromArgb(145, 160, 174));
+        var cols = GetTableColumns();
+        DrawCells(g, headFont, headBrush, y, cols, "Range", "Tokens", "Hit", "Hit%", "Req", "Cost");
+        y += 24;
+        foreach (var window in new[] { "today", "1d", "7d", "14d", "30d" })
         {
             var item = state.Tokens[window];
-            DrawTokenRow(g, y, UsageFormatter.FormatWindowName(window), item, maxTokens);
-            y += 23;
+            DrawCells(
+                g,
+                rowFont,
+                window == "today" ? rowBrush : mutedBrush,
+                y,
+                cols,
+                UsageFormatter.FormatWindowName(window),
+                UsageFormatter.FormatTokens(item.TotalTokens),
+                UsageFormatter.FormatTokens(item.HitTokens),
+                UsageFormatter.FormatPercent(item.HitRate),
+                item.Requests.ToString(CultureInfo.InvariantCulture),
+                UsageFormatter.FormatCost(item.TotalCostUsd));
+            y += 22;
         }
     }
 
-    private void DrawTokenRow(Graphics g, int y, string label, TokenWindow item, long maxTokens)
+    private int[] GetTableColumns()
     {
-        using var labelFont = new Font("Segoe UI Semibold", 8.5f);
-        using var valueFont = new Font("Segoe UI", 8.5f);
-        using var labelBrush = new SolidBrush(Color.FromArgb(220, 235, 242));
-        using var valueBrush = new SolidBrush(Color.FromArgb(148, 168, 180));
-        g.DrawString(label, labelFont, labelBrush, 20, y - 4);
-
-        var barX = 82;
-        var barY = y + 2;
-        var barW = 130;
-        var fillW = (int)(barW * Math.Clamp(item.TotalTokens / (double)maxTokens, 0, 1));
-        using var track = new SolidBrush(Color.FromArgb(28, 47, 65));
-        using var fill = new LinearGradientBrush(new Rectangle(barX, barY, Math.Max(1, fillW), 7), Color.FromArgb(65, 235, 210), Color.FromArgb(82, 145, 255), 0f);
-        g.FillRoundedRectangle(track, new Rectangle(barX, barY, barW, 7), 4);
-        g.FillRoundedRectangle(fill, new Rectangle(barX, barY, Math.Max(2, fillW), 7), 4);
-
-        DrawHitRing(g, 238, y - 4, item.HitRate);
-        g.DrawString($"{UsageFormatter.FormatTokens(item.TotalTokens)}  {UsageFormatter.FormatCost(item.TotalCostUsd)}", valueFont, valueBrush, 270, y - 5);
+        var left = 22;
+        var usable = Math.Max(340, Width - 44);
+        return
+        [
+            left,
+            left + (int)(usable * 0.16),
+            left + (int)(usable * 0.36),
+            left + (int)(usable * 0.55),
+            left + (int)(usable * 0.70),
+            left + (int)(usable * 0.82),
+        ];
     }
 
-    private static void DrawHitRing(Graphics g, int x, int y, double hitRate)
+    private static void DrawCells(Graphics g, Font font, Brush brush, int y, int[] x, params string[] values)
     {
-        var rect = new Rectangle(x, y, 18, 18);
-        using var track = new Pen(Color.FromArgb(38, 62, 80), 3);
-        using var fill = new Pen(Color.FromArgb(80, 220, 245), 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        g.DrawArc(track, rect, -90, 360);
-        g.DrawArc(fill, rect, -90, (float)(360 * Math.Clamp(hitRate, 0, 1)));
+        for (var i = 0; i < values.Length; i++)
+        {
+            g.DrawString(values[i], font, brush, x[i], y);
+        }
     }
 
     private void DrawFooter(Graphics g, UsageState state)
@@ -589,6 +867,82 @@ internal sealed class FloatingUsageWindow : Form
             : $"Using last good data - {_error}";
         g.DrawString(TrimToWidth(g, text, font, Width - 36), font, brush, 18, Height - 28);
     }
+
+    private void ToggleExpanded()
+    {
+        _expanded = !_expanded;
+        if (_expanded && Height < ExpandedHeight)
+        {
+            Height = ExpandedHeight;
+        }
+        else if (!_expanded && Height > CompactHeight)
+        {
+            Height = CompactHeight;
+        }
+
+        Invalidate();
+    }
+
+    private bool IsInResizeZone(Point p)
+    {
+        return p.X <= ResizeGrip ||
+               p.X >= Width - ResizeGrip ||
+               p.Y <= ResizeGrip ||
+               p.Y >= Height - ResizeGrip;
+    }
+
+    private Cursor GetResizeCursor(Point p)
+    {
+        if (_clickThrough)
+        {
+            return Cursors.Default;
+        }
+
+        var left = p.X <= ResizeGrip;
+        var right = p.X >= Width - ResizeGrip;
+        var top = p.Y <= ResizeGrip;
+        var bottom = p.Y >= Height - ResizeGrip;
+
+        if ((left && top) || (right && bottom))
+        {
+            return Cursors.SizeNWSE;
+        }
+
+        if ((right && top) || (left && bottom))
+        {
+            return Cursors.SizeNESW;
+        }
+
+        if (left || right)
+        {
+            return Cursors.SizeWE;
+        }
+
+        if (top || bottom)
+        {
+            return Cursors.SizeNS;
+        }
+
+        return Cursors.Default;
+    }
+
+    private void ApplyClickThrough()
+    {
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        var style = GetWindowLong(Handle, GwlExStyle);
+        style = _clickThrough ? style | WsExTransparent : style & ~WsExTransparent;
+        SetWindowLong(Handle, GwlExStyle, style);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
 
     private void DrawCenteredMessage(Graphics g, string message, string? detail)
     {
@@ -621,7 +975,19 @@ internal sealed class FloatingUsageWindow : Form
 
 internal static class GraphicsExtensions
 {
+    public static void DrawRoundedRectangle(this Graphics graphics, Pen pen, Rectangle bounds, int radius)
+    {
+        using var path = CreateRoundedPath(bounds, radius);
+        graphics.DrawPath(pen, path);
+    }
+
     public static void FillRoundedRectangle(this Graphics graphics, Brush brush, Rectangle bounds, int radius)
+    {
+        using var path = CreateRoundedPath(bounds, radius);
+        graphics.FillPath(brush, path);
+    }
+
+    private static GraphicsPath CreateRoundedPath(Rectangle bounds, int radius)
     {
         using var path = new GraphicsPath();
         var diameter = radius * 2;
@@ -630,7 +996,7 @@ internal static class GraphicsExtensions
         path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
         path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
-        graphics.FillPath(brush, path);
+        return (GraphicsPath)path.Clone();
     }
 }
 
@@ -942,7 +1308,7 @@ internal static class UsageFormatter
             : local.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture);
     }
 
-    private static string FormatPercent(double value)
+    public static string FormatPercent(double value)
     {
         return (value * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%";
     }

@@ -785,6 +785,7 @@ internal sealed class FloatingUsageWindow : Form
     private string? _error;
     private Point _dragStart;
     private bool _dragging;
+    private bool _dragMoved;
     private bool _expanded;
     private bool _clickThrough;
     private bool _lightMode;
@@ -957,6 +958,7 @@ internal sealed class FloatingUsageWindow : Form
         if (e.Button == MouseButtons.Left)
         {
             _dragging = true;
+            _dragMoved = false;
             _dragStart = e.Location;
         }
     }
@@ -973,8 +975,14 @@ internal sealed class FloatingUsageWindow : Form
 
         if (_dragging)
         {
-            Left += e.X - _dragStart.X;
-            Top += e.Y - _dragStart.Y;
+            var dx = e.X - _dragStart.X;
+            var dy = e.Y - _dragStart.Y;
+            if (dx != 0 || dy != 0)
+            {
+                _dragMoved = true;
+                Left += dx;
+                Top += dy;
+            }
         }
         else
         {
@@ -984,9 +992,14 @@ internal sealed class FloatingUsageWindow : Form
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        var shouldDock = _dragging && _dragMoved;
         _dragging = false;
+        _dragMoved = false;
         base.OnMouseUp(e);
-        DockToNearestEdgeIfNeeded();
+        if (shouldDock)
+        {
+            DockToNearestEdgeIfNeeded();
+        }
     }
 
     protected override void OnMouseEnter(EventArgs e)

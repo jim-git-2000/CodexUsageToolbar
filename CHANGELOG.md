@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.2.0 - 2026-07-01
+
+- Added edge auto-hide for all screen edges.
+- Added accent-colored edge strips with hover-to-expand behavior.
+- Improved edge docking when the toolbar is dragged partially off-screen.
+- Fixed edge-hover flicker and prevented button clicks from immediately hiding the expanded toolbar.
+
 ## v1.1.0 - 2026-06-26
 
 - Added custom application/tray icon support.

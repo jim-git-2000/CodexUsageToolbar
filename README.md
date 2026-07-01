@@ -36,9 +36,9 @@ The toolbar reads quota from Codex session `rate_limits` events and token/cost d
 
 ## Release Build
 
-Windows binaries are built by GitHub Actions. Push tag `v1.1.0` to create the GitHub Release asset:
+Windows binaries are built by GitHub Actions. Push tag `v1.2.0` to create the GitHub Release asset:
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```

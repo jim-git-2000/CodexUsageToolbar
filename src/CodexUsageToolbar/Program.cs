@@ -747,11 +747,22 @@ internal sealed class WindowSettings
     public int? Height { get; set; }
 }
 
+internal enum DockEdge
+{
+    None,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
 internal sealed class FloatingUsageWindow : Form
 {
     private const int CompactHeight = 190;
     private const int ExpandedHeight = 360;
     private const int ResizeGrip = 8;
+    private const int EdgeDockThreshold = 12;
+    private const int EdgeStripThickness = 8;
     private const int WmNcHitTest = 0x0084;
     private const int HtLeft = 10;
     private const int HtRight = 11;
@@ -789,6 +800,10 @@ internal sealed class FloatingUsageWindow : Form
     private ThemeOption _theme;
     private bool _shellHookRegistered;
     private bool _desktopReopenQueued;
+    private bool _collapsedToEdge;
+    private bool _suppressResizeMemory;
+    private Rectangle _visibleBounds;
+    private DockEdge _dockEdge = DockEdge.None;
 
     public event EventHandler? RefreshRequested;
 
@@ -812,6 +827,7 @@ internal sealed class FloatingUsageWindow : Form
         _fontScale = options.FontScale;
         _compactHeight = Math.Max(CompactHeight, Height);
         _expandedHeight = Math.Max(ExpandedHeight, Height);
+        _visibleBounds = Bounds;
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -863,7 +879,7 @@ internal sealed class FloatingUsageWindow : Form
 
     public void SaveWindowSettings()
     {
-        SettingsStore.SaveWindowBounds(Bounds);
+        SettingsStore.SaveWindowBounds(_collapsedToEdge ? _visibleBounds : Bounds);
     }
 
     public void SetClickThrough(bool enabled)
@@ -886,7 +902,7 @@ internal sealed class FloatingUsageWindow : Form
 
     public void ReopenOnCurrentVirtualDesktop()
     {
-        var bounds = Bounds;
+        var bounds = _collapsedToEdge ? Bounds : _visibleBounds;
         Hide();
         Bounds = bounds;
         Show();
@@ -896,6 +912,11 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        if (_collapsedToEdge)
+        {
+            ExpandFromEdge();
+        }
+
         if (IsInResizeZone(e.Location))
         {
             return;
@@ -935,6 +956,12 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        if (_collapsedToEdge)
+        {
+            Cursor = Cursors.Default;
+            return;
+        }
+
         if (_dragging)
         {
             Left += e.X - _dragStart.X;
@@ -950,12 +977,26 @@ internal sealed class FloatingUsageWindow : Form
     {
         _dragging = false;
         base.OnMouseUp(e);
+        DockToNearestEdgeIfNeeded();
+    }
+
+    protected override void OnMouseEnter(EventArgs e)
+    {
+        base.OnMouseEnter(e);
+        if (_collapsedToEdge && !_clickThrough)
+        {
+            ExpandFromEdge();
+        }
     }
 
     protected override void OnMouseLeave(EventArgs e)
     {
         Cursor = Cursors.Default;
         base.OnMouseLeave(e);
+        if (!_dragging && _dockEdge != DockEdge.None && !_clickThrough)
+        {
+            CollapseToEdge();
+        }
     }
 
     protected override void OnShown(EventArgs e)
@@ -980,6 +1021,12 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
+        if (_suppressResizeMemory || _collapsedToEdge)
+        {
+            Invalidate();
+            return;
+        }
+
         if (_expanded)
         {
             _expandedHeight = Math.Max(ExpandedHeight, Height);
@@ -989,7 +1036,14 @@ internal sealed class FloatingUsageWindow : Form
             _compactHeight = Math.Max(CompactHeight, Height);
         }
 
+        _visibleBounds = Bounds;
         Invalidate();
+    }
+
+    protected override void OnResizeEnd(EventArgs e)
+    {
+        base.OnResizeEnd(e);
+        DockToNearestEdgeIfNeeded();
     }
 
     protected override void WndProc(ref Message m)
@@ -1006,7 +1060,7 @@ internal sealed class FloatingUsageWindow : Form
             return;
         }
 
-        if (m.Msg == WmNcHitTest && !_clickThrough)
+        if (m.Msg == WmNcHitTest && !_clickThrough && !_collapsedToEdge)
         {
             base.WndProc(ref m);
             var raw = unchecked((int)m.LParam.ToInt64());
@@ -1080,6 +1134,12 @@ internal sealed class FloatingUsageWindow : Form
     {
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
+        if (_collapsedToEdge)
+        {
+            DrawEdgeStrip(g);
+            return;
+        }
+
         DrawBackground(g);
         DrawResizeHint(g);
         DrawHeader(g);
@@ -1107,6 +1167,12 @@ internal sealed class FloatingUsageWindow : Form
         g.FillRectangle(bg, ClientRectangle);
         using var border = new Pen(ThemePalette.WithAlpha(_theme.Accent, _lightMode ? 135 : 85), 1);
         g.DrawRectangle(border, 0, 0, Width - 1, Height - 1);
+    }
+
+    private void DrawEdgeStrip(Graphics g)
+    {
+        using var brush = new SolidBrush(_theme.Accent);
+        g.FillRectangle(brush, ClientRectangle);
     }
 
     private void DrawResizeHint(Graphics g)
@@ -1360,6 +1426,11 @@ internal sealed class FloatingUsageWindow : Form
 
     private void ToggleExpanded()
     {
+        if (_collapsedToEdge)
+        {
+            ExpandFromEdge();
+        }
+
         if (_expanded)
         {
             _expandedHeight = Math.Max(ExpandedHeight, Height);
@@ -1386,6 +1457,11 @@ internal sealed class FloatingUsageWindow : Form
 
     private bool IsInResizeZone(Point p)
     {
+        if (_collapsedToEdge)
+        {
+            return false;
+        }
+
         return p.X <= ResizeGrip ||
                p.X >= Width - ResizeGrip ||
                p.Y <= ResizeGrip ||
@@ -1394,7 +1470,7 @@ internal sealed class FloatingUsageWindow : Form
 
     private Cursor GetResizeCursor(Point p)
     {
-        if (_clickThrough)
+        if (_clickThrough || _collapsedToEdge)
         {
             return Cursors.Default;
         }
@@ -1437,6 +1513,109 @@ internal sealed class FloatingUsageWindow : Form
         var style = GetWindowLong(Handle, GwlExStyle);
         style = _clickThrough ? style | WsExTransparent : style & ~WsExTransparent;
         SetWindowLong(Handle, GwlExStyle, style);
+    }
+
+    private void DockToNearestEdgeIfNeeded()
+    {
+        if (_clickThrough || _collapsedToEdge)
+        {
+            return;
+        }
+
+        var edge = GetDockEdge(Bounds, out var area);
+        if (edge == DockEdge.None)
+        {
+            _dockEdge = DockEdge.None;
+            _visibleBounds = Bounds;
+            return;
+        }
+
+        _dockEdge = edge;
+        _visibleBounds = SnapBoundsToEdge(Bounds, area, edge);
+        CollapseToEdge();
+    }
+
+    private DockEdge GetDockEdge(Rectangle bounds, out Rectangle area)
+    {
+        area = Screen.FromRectangle(bounds).WorkingArea;
+        var distances = new (DockEdge Edge, int Distance)[]
+        {
+            (DockEdge.Left, Math.Abs(bounds.Left - area.Left)),
+            (DockEdge.Right, Math.Abs(area.Right - bounds.Right)),
+            (DockEdge.Top, Math.Abs(bounds.Top - area.Top)),
+            (DockEdge.Bottom, Math.Abs(area.Bottom - bounds.Bottom)),
+        };
+
+        var nearest = distances.OrderBy(item => item.Distance).First();
+        return nearest.Distance <= EdgeDockThreshold ? nearest.Edge : DockEdge.None;
+    }
+
+    private static Rectangle SnapBoundsToEdge(Rectangle bounds, Rectangle area, DockEdge edge)
+    {
+        var x = Math.Clamp(bounds.X, area.Left, Math.Max(area.Left, area.Right - bounds.Width));
+        var y = Math.Clamp(bounds.Y, area.Top, Math.Max(area.Top, area.Bottom - bounds.Height));
+        return edge switch
+        {
+            DockEdge.Left => new Rectangle(area.Left, y, bounds.Width, bounds.Height),
+            DockEdge.Right => new Rectangle(area.Right - bounds.Width, y, bounds.Width, bounds.Height),
+            DockEdge.Top => new Rectangle(x, area.Top, bounds.Width, bounds.Height),
+            DockEdge.Bottom => new Rectangle(x, area.Bottom - bounds.Height, bounds.Width, bounds.Height),
+            _ => bounds,
+        };
+    }
+
+    private void CollapseToEdge()
+    {
+        if (_dockEdge == DockEdge.None || _clickThrough)
+        {
+            return;
+        }
+
+        var area = Screen.FromRectangle(_visibleBounds).WorkingArea;
+        var stripBounds = _dockEdge switch
+        {
+            DockEdge.Left => new Rectangle(area.Left, _visibleBounds.Top, EdgeStripThickness, _visibleBounds.Height),
+            DockEdge.Right => new Rectangle(area.Right - EdgeStripThickness, _visibleBounds.Top, EdgeStripThickness, _visibleBounds.Height),
+            DockEdge.Top => new Rectangle(_visibleBounds.Left, area.Top, _visibleBounds.Width, EdgeStripThickness),
+            DockEdge.Bottom => new Rectangle(_visibleBounds.Left, area.Bottom - EdgeStripThickness, _visibleBounds.Width, EdgeStripThickness),
+            _ => Bounds,
+        };
+
+        _suppressResizeMemory = true;
+        try
+        {
+            MinimumSize = Size.Empty;
+            Bounds = stripBounds;
+            _collapsedToEdge = true;
+        }
+        finally
+        {
+            _suppressResizeMemory = false;
+        }
+
+        Invalidate();
+    }
+
+    private void ExpandFromEdge()
+    {
+        if (!_collapsedToEdge)
+        {
+            return;
+        }
+
+        _suppressResizeMemory = true;
+        try
+        {
+            MinimumSize = new Size(360, CompactHeight);
+            Bounds = _visibleBounds;
+            _collapsedToEdge = false;
+        }
+        finally
+        {
+            _suppressResizeMemory = false;
+        }
+
+        Invalidate();
     }
 
     [DllImport("user32.dll")]

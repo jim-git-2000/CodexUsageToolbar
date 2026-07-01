@@ -804,6 +804,7 @@ internal sealed class FloatingUsageWindow : Form
     private bool _suppressResizeMemory;
     private Rectangle _visibleBounds;
     private DockEdge _dockEdge = DockEdge.None;
+    private readonly System.Windows.Forms.Timer _edgeCollapseTimer;
 
     public event EventHandler? RefreshRequested;
 
@@ -828,6 +829,12 @@ internal sealed class FloatingUsageWindow : Form
         _compactHeight = Math.Max(CompactHeight, Height);
         _expandedHeight = Math.Max(ExpandedHeight, Height);
         _visibleBounds = Bounds;
+        _edgeCollapseTimer = new System.Windows.Forms.Timer { Interval = 160 };
+        _edgeCollapseTimer.Tick += (_, _) =>
+        {
+            _edgeCollapseTimer.Stop();
+            CollapseToEdgeIfPointerOutside();
+        };
     }
 
     protected override bool ShowWithoutActivation => true;
@@ -912,6 +919,7 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+        _edgeCollapseTimer.Stop();
         if (_collapsedToEdge)
         {
             ExpandFromEdge();
@@ -956,6 +964,7 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        _edgeCollapseTimer.Stop();
         if (_collapsedToEdge)
         {
             Cursor = Cursors.Default;
@@ -983,6 +992,7 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnMouseEnter(EventArgs e)
     {
         base.OnMouseEnter(e);
+        _edgeCollapseTimer.Stop();
         if (_collapsedToEdge && !_clickThrough)
         {
             ExpandFromEdge();
@@ -995,7 +1005,8 @@ internal sealed class FloatingUsageWindow : Form
         base.OnMouseLeave(e);
         if (!_dragging && _dockEdge != DockEdge.None && !_clickThrough)
         {
-            CollapseToEdge();
+            _edgeCollapseTimer.Stop();
+            _edgeCollapseTimer.Start();
         }
     }
 
@@ -1014,8 +1025,19 @@ internal sealed class FloatingUsageWindow : Form
 
     protected override void OnHandleDestroyed(EventArgs e)
     {
+        _edgeCollapseTimer.Stop();
         UnregisterShellHook();
         base.OnHandleDestroyed(e);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _edgeCollapseTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
     }
 
     protected override void OnResize(EventArgs e)
@@ -1540,10 +1562,10 @@ internal sealed class FloatingUsageWindow : Form
         area = Screen.FromRectangle(bounds).WorkingArea;
         var distances = new (DockEdge Edge, int Distance)[]
         {
-            (DockEdge.Left, Math.Abs(bounds.Left - area.Left)),
-            (DockEdge.Right, Math.Abs(area.Right - bounds.Right)),
-            (DockEdge.Top, Math.Abs(bounds.Top - area.Top)),
-            (DockEdge.Bottom, Math.Abs(area.Bottom - bounds.Bottom)),
+            (DockEdge.Left, bounds.Left - area.Left),
+            (DockEdge.Right, area.Right - bounds.Right),
+            (DockEdge.Top, bounds.Top - area.Top),
+            (DockEdge.Bottom, area.Bottom - bounds.Bottom),
         };
 
         var nearest = distances.OrderBy(item => item.Distance).First();
@@ -1594,6 +1616,21 @@ internal sealed class FloatingUsageWindow : Form
         }
 
         Invalidate();
+    }
+
+    private void CollapseToEdgeIfPointerOutside()
+    {
+        if (_dragging || _dockEdge == DockEdge.None || _clickThrough || _collapsedToEdge)
+        {
+            return;
+        }
+
+        if (Bounds.Contains(Cursor.Position))
+        {
+            return;
+        }
+
+        CollapseToEdge();
     }
 
     private void ExpandFromEdge()

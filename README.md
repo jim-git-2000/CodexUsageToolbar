@@ -2,7 +2,7 @@
 
 A lightweight Windows floating toolbar that displays Codex quota, token usage, cache hits, request counts, and estimated cost. A small Ubuntu exporter reads cc-switch data and Codex session rate-limit events; the Windows client fetches its sanitized JSON over SSH.
 
-Current release: `v1.2.0`.
+Current release: `v1.3.0`.
 
 ## Features
 

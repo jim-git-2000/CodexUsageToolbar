@@ -1,5 +1,6 @@
 .dotnet-home/
 bin/
 obj/
+settings.json
 *.user
 *.suo

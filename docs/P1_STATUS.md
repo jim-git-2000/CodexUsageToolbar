@@ -1,5 +1,7 @@
 # P1 Status - JSON Contract Verification
 
+> Historical completion record. Current setup and validation commands are maintained in `README.md`.
+
 Date: 2026-06-26
 
 ## Goal
@@ -110,7 +112,7 @@ Diagnostic mode:
 
 This only checks SSH, user/home, and possible cc-switch/exporter paths. It does not validate the JSON contract.
 
-## To Complete P1
+## Historical Completion Criteria
 
 Detected Ubuntu prompt:
 

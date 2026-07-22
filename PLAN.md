@@ -1,5 +1,7 @@
 # Codex Usage Toolbar for Windows — PLAN
 
+> 历史实现计划：其中的阶段已完成，部分设想未进入现有实现。当前使用、开发、数据边界和发布合同以 `README.md` 为准，版本历史以 `CHANGELOG.md` 为准。
+
 ## 0. 目标
 
 做一个尽量轻量的 Windows 桌面工具，用于显示 Hyper-V Ubuntu VM 中 cc-switch 已采集到的 Codex 用量数据。

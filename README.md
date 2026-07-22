@@ -6,7 +6,8 @@ Current release: `v1.2.0`.
 
 ## Features
 
-- 5-hour and weekly quota, including reset times.
+- Optional 5-hour quota and always-visible weekly quota, including reset times.
+- Earned Codex rate-limit reset count and the nearest available-credit expiry time when reported by Codex.
 - Today, 1-day, 7-day, 14-day, and 30-day usage windows.
 - Compact and expanded views, ring or bar quota layouts, dark or light backgrounds, accent colors, and adjustable font size.
 - Tray controls, click-through, always-on-top, start-with-Windows, resizing, and edge auto-hide.
@@ -45,7 +46,7 @@ Run the toolbar:
 .\CodexUsageToolbar.exe
 ```
 
-The application reads `settings.json` from the current directory first, then from the executable directory. Tray and window changes are saved back to the selected file. See `settings.example.json` for every supported setting.
+The application reads `settings.json` from the current directory first, then from the executable directory. Tray and window changes are saved back to the selected file. Use the tray menu's `Show 5h quota` checkbox to show or hide the 5-hour panel; the choice persists in `showFiveHourQuota`. See `settings.example.json` for every supported setting.
 
 ## Validate the Data Path
 
@@ -83,10 +84,13 @@ The Ubuntu exporter:
 
 - aggregates Codex-only token and estimated-cost fields from cc-switch's `proxy_request_logs`;
 - reads only non-secret `rate_limits` fields from Codex session JSONL files;
-- returns schema version `1.0` for `today`, `1d`, `7d`, `14d`, and `30d`;
+- asks the local Codex app-server for earned reset-credit count and expiry metadata without reading or exporting `auth.json`;
+- returns schema version `1.1` for `today`, `1d`, `7d`, `14d`, and `30d`;
 - opens the cc-switch database read-only.
 
-Quota can be unavailable while token data remains valid. The exporter reports that state explicitly instead of inventing values.
+Quota or reset-credit data can be unavailable while token data remains valid. The exporter reports those states explicitly instead of inventing values. Reset-credit lookup requires a signed-in Codex CLI version that supports `account/rateLimits/read`; only the count, expiry, and refresh timestamps cross SSH.
+
+Reset-credit metadata is queried immediately when no cached content exists, then at most once per hour while cached content is available. The exporter keeps the sanitized runtime cache at `~/.cache/codex-usage-toolbar/reset-credits.json`. If an hourly refresh fails, the previous content remains available and is marked stale; the next backend attempt occurs one hour later. This single cache file can be deleted safely to force an immediate query.
 
 ## Development
 

@@ -85,6 +85,7 @@ internal static class Program
         bool StartHidden,
         bool ClickThrough,
         bool StartWithWindows,
+        bool ShowFiveHourQuota,
         string AccentColor,
         string BackgroundMode,
         string QuotaLayout,
@@ -128,6 +129,7 @@ internal static class Program
             var startHidden = settings.StartHidden ?? false;
             var clickThrough = settings.ClickThrough ?? false;
             var startWithWindows = settings.StartWithWindows ?? false;
+            var showFiveHourQuota = settings.ShowFiveHourQuota ?? true;
             var accentColor = settings.AccentColor ?? ThemePalette.DefaultKey;
             var backgroundMode = ResolveChoice(settings.BackgroundMode, "dark", "dark", "light");
             var quotaLayout = ResolveChoice(settings.QuotaLayout, "ring", "ring", "bar");
@@ -202,6 +204,7 @@ internal static class Program
                 startHidden,
                 clickThrough,
                 startWithWindows,
+                showFiveHourQuota,
                 ThemePalette.Resolve(accentColor).Key,
                 backgroundMode,
                 quotaLayout,
@@ -254,6 +257,7 @@ internal sealed class TrayAppContext : ApplicationContext
     private ToolStripMenuItem? _clickThroughItem;
     private ToolStripMenuItem? _startWithWindowsItem;
     private ToolStripMenuItem? _alwaysOnTopItem;
+    private ToolStripMenuItem? _showFiveHourQuotaItem;
     private bool _refreshing;
 
     public TrayAppContext(Program.AppOptions options)
@@ -320,6 +324,18 @@ internal sealed class TrayAppContext : ApplicationContext
             SettingsStore.SaveRuntimeFlags(startWithWindows: _startWithWindowsItem.Checked);
         };
         menu.Items.Add(_startWithWindowsItem);
+
+        _showFiveHourQuotaItem = new ToolStripMenuItem("Show 5h quota")
+        {
+            CheckOnClick = true,
+            Checked = _options.ShowFiveHourQuota,
+        };
+        _showFiveHourQuotaItem.CheckedChanged += (_, _) =>
+        {
+            _window.SetFiveHourQuotaVisible(_showFiveHourQuotaItem.Checked);
+            SettingsStore.SaveRuntimeFlags(showFiveHourQuota: _showFiveHourQuotaItem.Checked);
+        };
+        menu.Items.Add(_showFiveHourQuotaItem);
 
         var themeMenu = new ToolStripMenuItem("Theme color");
         foreach (var theme in ThemePalette.Options)
@@ -526,6 +542,7 @@ internal static class SettingsStore
         bool? clickThrough = null,
         bool? alwaysOnTop = null,
         bool? startWithWindows = null,
+        bool? showFiveHourQuota = null,
         string? accentColor = null,
         string? backgroundMode = null,
         string? quotaLayout = null,
@@ -536,6 +553,7 @@ internal static class SettingsStore
             if (clickThrough is not null) settings.ClickThrough = clickThrough;
             if (alwaysOnTop is not null) settings.AlwaysOnTop = alwaysOnTop;
             if (startWithWindows is not null) settings.StartWithWindows = startWithWindows;
+            if (showFiveHourQuota is not null) settings.ShowFiveHourQuota = showFiveHourQuota;
             if (!string.IsNullOrWhiteSpace(accentColor)) settings.AccentColor = ThemePalette.Resolve(accentColor).Key;
             if (!string.IsNullOrWhiteSpace(backgroundMode)) settings.BackgroundMode = Program.AppOptions.ResolveChoice(backgroundMode, "dark", "dark", "light");
             if (!string.IsNullOrWhiteSpace(quotaLayout)) settings.QuotaLayout = Program.AppOptions.ResolveChoice(quotaLayout, "ring", "ring", "bar");
@@ -688,6 +706,7 @@ internal sealed class AppSettings
     public bool? StartHidden { get; set; }
     public bool? ClickThrough { get; set; }
     public bool? StartWithWindows { get; set; }
+    public bool? ShowFiveHourQuota { get; set; }
     public string? AccentColor { get; set; }
     public string? BackgroundMode { get; set; }
     public string? QuotaLayout { get; set; }
@@ -790,6 +809,7 @@ internal sealed class FloatingUsageWindow : Form
     private bool _clickThrough;
     private bool _lightMode;
     private bool _barLayout;
+    private bool _showFiveHourQuota;
     private Rectangle _modeButton;
     private Rectangle _layoutButton;
     private Rectangle _toggleButton;
@@ -826,6 +846,7 @@ internal sealed class FloatingUsageWindow : Form
         _clickThrough = options.ClickThrough;
         _lightMode = StringComparer.OrdinalIgnoreCase.Equals(options.BackgroundMode, "light");
         _barLayout = StringComparer.OrdinalIgnoreCase.Equals(options.QuotaLayout, "bar");
+        _showFiveHourQuota = options.ShowFiveHourQuota;
         _fontScale = options.FontScale;
         _compactHeight = Math.Max(CompactHeight, Height);
         _expandedHeight = Math.Max(ExpandedHeight, Height);
@@ -905,6 +926,12 @@ internal sealed class FloatingUsageWindow : Form
     public void SetFontScale(double scale)
     {
         _fontScale = Math.Clamp(scale, 0.85, 1.25);
+        Invalidate();
+    }
+
+    public void SetFiveHourQuotaVisible(bool visible)
+    {
+        _showFiveHourQuota = visible;
         Invalidate();
     }
 
@@ -1293,6 +1320,14 @@ internal sealed class FloatingUsageWindow : Form
 
         var top = 72;
         var panelHeight = Math.Min(112, Height - 108);
+        if (!_showFiveHourQuota)
+        {
+            var singleWidth = Math.Min(240, Width - 40);
+            var singleLeft = Math.Max(20, (Width - singleWidth) / 2);
+            DrawQuotaCircle(g, new Rectangle(singleLeft, top, singleWidth, panelHeight), "Week", state.Quota.Weekly);
+            return;
+        }
+
         var half = (Width - 40) / 2;
         DrawQuotaCircle(g, new Rectangle(20, top, half - 8, panelHeight), "5h", state.Quota.FiveHour);
         DrawQuotaCircle(g, new Rectangle(28 + half, top, half - 8, panelHeight), "Week", state.Quota.Weekly);
@@ -1329,6 +1364,12 @@ internal sealed class FloatingUsageWindow : Form
 
     private void DrawQuotaBars(Graphics g, UsageState state)
     {
+        if (!_showFiveHourQuota)
+        {
+            DrawQuotaBar(g, new Rectangle(20, 96, Width - 40, 48), "Week", state.Quota.Weekly);
+            return;
+        }
+
         DrawQuotaBar(g, new Rectangle(20, 74, Width - 40, 48), "5h", state.Quota.FiveHour);
         DrawQuotaBar(g, new Rectangle(20, 128, Width - 40, 48), "Week", state.Quota.Weekly);
     }
@@ -1442,7 +1483,18 @@ internal sealed class FloatingUsageWindow : Form
         var text = _error is null
             ? $"Refresh {UsageFormatter.FormatTime(state.LastSuccessAt)}  Event {UsageFormatter.FormatTime(state.LastEventAt)}"
             : $"Using last good data - {_error}";
-        g.DrawString(TrimToWidth(g, text, font, Width - 36), font, brush, 18, Height - 28);
+        var resetText = _error is null ? UsageFormatter.FormatResetCreditsForUi(state.ResetCredits) : "";
+        if (string.IsNullOrEmpty(resetText))
+        {
+            g.DrawString(TrimToWidth(g, text, font, Width - 36), font, brush, 18, Height - 28);
+            return;
+        }
+
+        var resetSize = g.MeasureString(resetText, font);
+        var resetX = Math.Max(18, Width - 18 - resetSize.Width);
+        var statusWidth = Math.Max(24, (int)(resetX - 30));
+        g.DrawString(TrimToWidth(g, text, font, statusWidth), font, brush, 18, Height - 28);
+        g.DrawString(resetText, font, brush, resetX, Height - 28);
     }
 
     private void ToggleBackgroundMode()
@@ -1845,7 +1897,7 @@ internal static class UsageJsonParser
             using var doc = JsonDocument.Parse(rawJson);
             var root = doc.RootElement;
             RequireString(root, "schema_version", out var schemaVersion);
-            if (schemaVersion != "1.0")
+            if (schemaVersion is not ("1.0" or "1.1"))
             {
                 throw new InvalidOperationException($"unsupported schema_version: {schemaVersion}");
             }
@@ -1860,6 +1912,9 @@ internal static class UsageJsonParser
             var quota = new QuotaState(
                 ParseQuotaWindow(root.GetProperty("quota").GetProperty("five_hour")),
                 ParseQuotaWindow(root.GetProperty("quota").GetProperty("weekly")));
+            var resetCredits = schemaVersion == "1.1"
+                ? ParseResetCredits(root.GetProperty("reset_credits"))
+                : ResetCreditsState.Unavailable;
             var tokensRoot = root.GetProperty("tokens");
             var tokenWindows = new Dictionary<string, TokenWindow>(StringComparer.Ordinal);
             foreach (var window in RequiredWindows)
@@ -1881,6 +1936,7 @@ internal static class UsageJsonParser
             return new UsageState(
                 collectedAt,
                 quota,
+                resetCredits,
                 tokenWindows,
                 RequireDateTime(refreshRoot, "last_success_at"),
                 OptionalDateTime(refreshRoot, "cc_switch_last_event_at"),
@@ -1898,6 +1954,31 @@ internal static class UsageJsonParser
             RequireBool(item, "available"),
             RequireNullableDouble(item, "remaining_percent"),
             OptionalDateTime(item, "reset_at"));
+    }
+
+    private static ResetCreditsState ParseResetCredits(JsonElement item)
+    {
+        var expirations = new List<DateTimeOffset>();
+        if (!item.TryGetProperty("expires_at", out var expiresAt) || expiresAt.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("missing or invalid array field: expires_at");
+        }
+
+        foreach (var expiration in expiresAt.EnumerateArray())
+        {
+            if (expiration.ValueKind != JsonValueKind.String ||
+                !DateTimeOffset.TryParse(expiration.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var value))
+            {
+                throw new InvalidOperationException("invalid datetime in array field: expires_at");
+            }
+            expirations.Add(value);
+        }
+
+        return new ResetCreditsState(
+            RequireBool(item, "available"),
+            RequireNullableInt32(item, "available_count"),
+            OptionalDateTime(item, "next_expires_at"),
+            expirations);
     }
 
     private static void RequireString(JsonElement root, string name, out string value)
@@ -1944,6 +2025,20 @@ internal static class UsageJsonParser
 
     private static int RequireInt32(JsonElement root, string name) => checked((int)RequireInt64(root, name));
 
+    private static int? RequireNullableInt32(JsonElement root, string name)
+    {
+        if (!root.TryGetProperty(name, out var item))
+        {
+            throw new InvalidOperationException($"missing integer field: {name}");
+        }
+
+        return item.ValueKind == JsonValueKind.Null
+            ? null
+            : item.TryGetInt32(out var value)
+                ? value
+                : throw new InvalidOperationException($"invalid integer field: {name}");
+    }
+
     private static long RequireInt64(JsonElement root, string name)
     {
         if (!root.TryGetProperty(name, out var item) || !item.TryGetInt64(out var value))
@@ -1978,6 +2073,7 @@ internal static class UsageJsonParser
 internal sealed record UsageState(
     DateTimeOffset CollectedAt,
     QuotaState Quota,
+    ResetCreditsState ResetCredits,
     IReadOnlyDictionary<string, TokenWindow> Tokens,
     DateTimeOffset LastSuccessAt,
     DateTimeOffset? LastEventAt,
@@ -1986,6 +2082,15 @@ internal sealed record UsageState(
 internal sealed record QuotaState(QuotaWindow FiveHour, QuotaWindow Weekly);
 
 internal sealed record QuotaWindow(bool Available, double? RemainingPercent, DateTimeOffset? ResetAt);
+
+internal sealed record ResetCreditsState(
+    bool Available,
+    int? AvailableCount,
+    DateTimeOffset? NextExpiresAt,
+    IReadOnlyList<DateTimeOffset> ExpiresAt)
+{
+    public static ResetCreditsState Unavailable { get; } = new(false, null, null, Array.Empty<DateTimeOffset>());
+}
 
 internal sealed record TokenWindow(long TotalTokens, long HitTokens, double HitRate, int Requests, decimal TotalCostUsd);
 
@@ -1996,6 +2101,7 @@ internal static class UsageFormatter
         var sb = new StringBuilder();
         sb.AppendLine($"5h left {FormatQuotaForUi(state.Quota.FiveHour)}, reset {FormatTime(state.Quota.FiveHour.ResetAt)}");
         sb.AppendLine($"Week left {FormatQuotaForUi(state.Quota.Weekly)}, reset {FormatTime(state.Quota.Weekly.ResetAt)}");
+        sb.AppendLine($"Reset credits {FormatResetCreditsForConsole(state.ResetCredits)}");
         foreach (var window in new[] { "today", "1d", "7d", "14d", "30d" })
         {
             var item = state.Tokens[window];
@@ -2040,6 +2146,32 @@ internal static class UsageFormatter
         return !quota.Available || quota.RemainingPercent is null
             ? "--"
             : $"{quota.RemainingPercent.Value:0.#}%";
+    }
+
+    public static string FormatResetCreditsForUi(ResetCreditsState resetCredits)
+    {
+        if (!resetCredits.Available || resetCredits.AvailableCount is null)
+        {
+            return "";
+        }
+
+        var text = $"Resets {resetCredits.AvailableCount.Value}";
+        return resetCredits.NextExpiresAt is null
+            ? text
+            : $"{text} · exp {FormatTime(resetCredits.NextExpiresAt)}";
+    }
+
+    private static string FormatResetCreditsForConsole(ResetCreditsState resetCredits)
+    {
+        if (!resetCredits.Available || resetCredits.AvailableCount is null)
+        {
+            return "unavailable";
+        }
+
+        var text = resetCredits.AvailableCount.Value.ToString(CultureInfo.InvariantCulture);
+        return resetCredits.NextExpiresAt is null
+            ? text
+            : $"{text}, next expires {FormatTime(resetCredits.NextExpiresAt)}";
     }
 
     public static string FormatTime(DateTimeOffset? value)

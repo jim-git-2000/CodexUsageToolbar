@@ -88,6 +88,7 @@ RequireField $data "app" "<root>"
 RequireField $data "source" "<root>"
 RequireField $data "collected_at" "<root>"
 RequireField $data "quota" "<root>"
+RequireField $data "reset_credits" "<root>"
 RequireField $data "tokens" "<root>"
 RequireField $data "refresh" "<root>"
 RequireField $data "errors" "<root>"
@@ -96,8 +97,8 @@ if ($data.app -ne "codex") {
     Fail "Expected app=codex, got app=$($data.app)"
 }
 
-if ($data.schema_version -ne "1.0") {
-    Fail "Expected schema_version=1.0, got schema_version=$($data.schema_version)"
+if ($data.schema_version -ne "1.1") {
+    Fail "Expected schema_version=1.1, got schema_version=$($data.schema_version)"
 }
 
 RequireField $data.quota "five_hour" "quota"
@@ -108,6 +109,14 @@ RequireField $data.quota.five_hour "available" "quota.five_hour"
 RequireField $data.quota.weekly "remaining_percent" "quota.weekly"
 RequireField $data.quota.weekly "reset_at" "quota.weekly"
 RequireField $data.quota.weekly "available" "quota.weekly"
+
+RequireField $data.reset_credits "available" "reset_credits"
+RequireField $data.reset_credits "available_count" "reset_credits"
+RequireField $data.reset_credits "next_expires_at" "reset_credits"
+RequireField $data.reset_credits "expires_at" "reset_credits"
+RequireField $data.reset_credits "fetched_at" "reset_credits"
+RequireField $data.reset_credits "checked_at" "reset_credits"
+RequireField $data.reset_credits "stale" "reset_credits"
 
 RequireTokenWindow $data.tokens "today"
 RequireTokenWindow $data.tokens "1d"
@@ -128,6 +137,7 @@ Write-Host ""
 Write-Host "quota:"
 Write-Host "  5h available: $($data.quota.five_hour.available), remaining: $($data.quota.five_hour.remaining_percent), reset: $($data.quota.five_hour.reset_at)"
 Write-Host "  weekly available: $($data.quota.weekly.available), remaining: $($data.quota.weekly.remaining_percent), reset: $($data.quota.weekly.reset_at)"
+Write-Host "  reset credits available: $($data.reset_credits.available), count: $($data.reset_credits.available_count), next expiry: $($data.reset_credits.next_expires_at)"
 Write-Host ""
 Write-Host "tokens:"
 foreach ($window in @("today", "1d", "7d", "14d", "30d")) {

@@ -11,6 +11,7 @@
   "startHidden": false,
   "clickThrough": false,
   "startWithWindows": false,
+  "showFiveHourQuota": true,
   "accentColor": "cyan",
   "backgroundMode": "dark",
   "quotaLayout": "ring",

@@ -68,12 +68,13 @@ require(data, "app", "<root>")
 require(data, "source", "<root>")
 require(data, "collected_at", "<root>")
 quota = require(data, "quota", "<root>")
+reset_credits = require(data, "reset_credits", "<root>")
 tokens = require(data, "tokens", "<root>")
 refresh = require(data, "refresh", "<root>")
 require(data, "errors", "<root>")
 
-if data["schema_version"] != "1.0":
-    raise SystemExit(f"ERROR: expected schema_version=1.0, got {data['schema_version']!r}")
+if data["schema_version"] != "1.1":
+    raise SystemExit(f"ERROR: expected schema_version=1.1, got {data['schema_version']!r}")
 if data["app"] != "codex":
     raise SystemExit(f"ERROR: expected app=codex, got {data['app']!r}")
 
@@ -81,6 +82,11 @@ for quota_name in ("five_hour", "weekly"):
     item = require(quota, quota_name, "quota")
     for key in ("remaining_percent", "reset_at", "available"):
         require(item, key, f"quota.{quota_name}")
+
+for key in ("available", "available_count", "next_expires_at", "expires_at", "fetched_at", "checked_at", "stale"):
+    require(reset_credits, key, "reset_credits")
+if not isinstance(reset_credits["expires_at"], list):
+    raise SystemExit("ERROR: reset_credits.expires_at must be an array")
 
 for window in ("today", "1d", "7d", "14d", "30d"):
     item = require(tokens, window, "tokens")
@@ -95,4 +101,5 @@ print(f"schema_version: {data['schema_version']}")
 print(f"app: {data['app']}")
 print(f"collected_at: {data['collected_at']}")
 print("windows: today, 1d, 7d, 14d, 30d")
+print(f"reset credits: available={reset_credits['available']}, count={reset_credits['available_count']}, next expiry={reset_credits['next_expires_at']}")
 PY

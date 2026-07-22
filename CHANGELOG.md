@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Added a persistent tray switch for showing or hiding the 5-hour quota panel.
+- Added earned Codex rate-limit reset count and nearest-expiry display through the local Codex app-server, with hourly refresh and stale-cache fallback.
+- Updated the exporter contract to schema version 1.1 while retaining client compatibility with 1.0 caches.
+
 ## v1.2.0 - 2026-07-01
 
 - Added edge auto-hide for all screen edges.

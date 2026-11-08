@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.1 - 2026-11-08
+
+- Automatically retried failed credit queries on the next toolbar poll after a 15-second cooldown, upgraded legacy five-second client timeouts, and prevented overlapping refreshes.
+
+- Filtered expired reset credits in the exporter and Windows client, including old last-good responses, and marked stale credit data with its actual fetch time.
+- Replaced the reset-credit menu with a popup that matches the toolbar background, accent and font size, aligns date/time columns, and aligns its right edge with the main window.
+- Allowed eight seconds for live credit queries and added a Codex lookup fallback for SSH sessions with a minimal PATH.
+
 ## v1.4.0 - 2026-11-08
 
 - Kept the last refresh time and clickable reset-credit summary visible when using cached data; moved full refresh errors and event timestamps into a footer tooltip.

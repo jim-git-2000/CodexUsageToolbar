@@ -119,6 +119,8 @@ internal static class Program
             var port = settings.Port ?? 22;
             var connectTimeoutSeconds = settings.ConnectTimeoutSeconds ?? 3;
             var commandTimeoutSeconds = settings.CommandTimeoutSeconds ?? 15;
+            // Upgrade the old template default; an explicit CLI timeout can still override it.
+            if (commandTimeoutSeconds == 5) commandTimeoutSeconds = 15;
             var pollIntervalSeconds = settings.PollIntervalSeconds ?? 60;
             var windowX = settings.Window?.X;
             var windowY = settings.Window?.Y;
@@ -273,7 +275,7 @@ internal sealed class TrayAppContext : ApplicationContext
         };
         _trayIcon.ContextMenuStrip = BuildMenu();
         _trayIcon.DoubleClick += (_, _) => ToggleWindow();
-        _window.RefreshRequested += async (_, _) => await RefreshAsync(force: true);
+        _window.RefreshRequested += async (_, _) => await RefreshAsync();
         if (options.StartWithWindows && !StartupManager.IsEnabled())
         {
             StartupManager.SetEnabled(true);
@@ -299,7 +301,7 @@ internal sealed class TrayAppContext : ApplicationContext
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Show / Hide", null, (_, _) => ToggleWindow());
-        menu.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync(force: true));
+        menu.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync());
         menu.Items.Add(new ToolStripSeparator());
         _clickThroughItem = new ToolStripMenuItem("Click-through") { CheckOnClick = true, Checked = _options.ClickThrough };
         _clickThroughItem.CheckedChanged += (_, _) =>
@@ -407,9 +409,9 @@ internal sealed class TrayAppContext : ApplicationContext
         }
     }
 
-    private async Task RefreshAsync(bool force = false)
+    private async Task RefreshAsync()
     {
-        if (_refreshing && !force)
+        if (_refreshing)
         {
             return;
         }
@@ -815,7 +817,7 @@ internal sealed class FloatingUsageWindow : Form
     private Rectangle _toggleButton;
     private Rectangle _refreshButton;
     private Rectangle _resetCreditsBounds;
-    private readonly ContextMenuStrip _resetCreditsMenu = new();
+    private readonly ToolStripDropDown _resetCreditsMenu = new() { Padding = Padding.Empty, AutoSize = false };
     private readonly ToolTip _footerToolTip = new() { AutoPopDelay = 30000, InitialDelay = 500, ReshowDelay = 100 };
     private int _shellHookMessage;
     private int _compactHeight = CompactHeight;
@@ -1500,32 +1502,78 @@ internal sealed class FloatingUsageWindow : Form
 
     private void ShowResetCredits()
     {
-        var credits = _state?.ResetCredits;
-        if (credits is null || !credits.Available)
+        if (_state is null) return;
+        var credits = _state.ResetCredits.Current(DateTimeOffset.UtcNow);
+        while (_resetCreditsMenu.Items.Count > 0)
         {
-            return;
+            _resetCreditsMenu.Items[0].Dispose();
         }
 
-        _resetCreditsMenu.Items.Clear();
-        _resetCreditsMenu.ShowImageMargin = false;
-        _resetCreditsMenu.BackColor = _lightMode ? Color.White : Color.FromArgb(32, 32, 36);
-        _resetCreditsMenu.ForeColor = PrimaryTextColor();
-        _resetCreditsMenu.Items.Add($"Reset credits: {credits.AvailableCount}");
-        _resetCreditsMenu.Items.Add(new ToolStripSeparator());
-        var expirations = credits.ExpiresAt.OrderBy(value => value).ToArray();
-        for (var i = 0; i < expirations.Length; i++)
+        using var measure = CreateGraphics();
+        using var rowFont = UiFont("Segoe UI", 8.5f);
+        var padding = (int)Math.Ceiling(16 * _fontScale);
+        var rowHeight = (int)Math.Ceiling(24 * _fontScale);
+        var stampWidth = (int)Math.Ceiling(measure.MeasureString("Updated 2026-12-31 23:59:59", rowFont).Width);
+        var width = Math.Max((int)Math.Ceiling(300 * _fontScale), stampWidth + padding * 2);
+        var rows = Math.Max(1, credits.ExpiresAt.Count);
+        var height = padding * 2 + rowHeight * (4 + rows);
+        var panel = new Panel { Size = new Size(width, height), Margin = Padding.Empty };
+        panel.Paint += (_, e) =>
         {
-            var local = expirations[i].ToLocalTime();
-            _resetCreditsMenu.Items.Add($"{i + 1}. Expires {local:yyyy-MM-dd HH:mm:ss}");
-        }
-        if (expirations.Length == 0)
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var background = new LinearGradientBrush(panel.ClientRectangle,
+                _lightMode ? Color.FromArgb(244, 248, 251) : Color.FromArgb(10, 15, 28),
+                _lightMode ? Color.FromArgb(224, 235, 242) : Color.FromArgb(18, 30, 46), 35f);
+            using var border = new Pen(ThemePalette.WithAlpha(_theme.Accent, _lightMode ? 135 : 85));
+            using var primary = new SolidBrush(PrimaryTextColor());
+            using var muted = new SolidBrush(MutedTextColor());
+            using var accent = new SolidBrush(ThemePalette.WithAlpha(_theme.Accent, 220));
+            using var textFont = UiFont("Segoe UI", 8.5f);
+            using var headingFont = UiFont("Segoe UI Semibold", 9.5f);
+            g.FillRectangle(background, panel.ClientRectangle);
+            g.DrawRectangle(border, 0, 0, width - 1, height - 1);
+            var count = credits.AvailableCount?.ToString(CultureInfo.InvariantCulture) ?? "--";
+            g.DrawString($"Reset credits  {count}", headingFont, primary, padding, padding);
+            var status = !credits.Available ? "Unavailable · try Refresh"
+                : credits.Stale || _stale ? "Cached · awaiting refresh" : "Live";
+            g.DrawString(status, textFont, muted, padding, padding + rowHeight);
+            var updated = credits.FetchedAt is null ? "Updated --"
+                : $"Updated {credits.FetchedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm:ss}";
+            g.DrawString(updated, textFont, muted, padding, padding + rowHeight * 2);
+            var y = padding + rowHeight * 3;
+            g.DrawLine(border, padding, y - 3, width - padding, y - 3);
+            var dateX = padding + (int)Math.Ceiling(32 * _fontScale);
+            var timeX = width - padding - g.MeasureString("23:59:59", textFont).Width;
+            g.DrawString("#", textFont, accent, padding, y);
+            g.DrawString("Expiry date", textFont, accent, dateX, y);
+            g.DrawString("Time", textFont, accent, timeX, y);
+            y += rowHeight;
+            if (credits.ExpiresAt.Count == 0)
+            {
+                var empty = !credits.Available ? "Expiry times unavailable"
+                    : credits.Stale || _stale ? "No unexpired entries in cache"
+                    : credits.AvailableCount == 0 ? "No reset credits available" : "Expiry times unavailable";
+                g.DrawString(empty, textFont, muted, padding, y);
+            }
+            for (var i = 0; i < credits.ExpiresAt.Count; i++)
+            {
+                var local = credits.ExpiresAt[i].ToLocalTime();
+                g.DrawString((i + 1).ToString(CultureInfo.InvariantCulture), textFont, muted, padding, y);
+                g.DrawString(local.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), textFont, primary, dateX, y);
+                g.DrawString(local.ToString("HH:mm:ss", CultureInfo.InvariantCulture), textFont, primary, timeX, y);
+                y += rowHeight;
+            }
+        };
+        var host = new ToolStripControlHost(panel)
         {
-            _resetCreditsMenu.Items.Add(credits.AvailableCount == 0
-                ? "No reset credits available" : "Expiry times unavailable");
-        }
+            AutoSize = false, Size = panel.Size, Margin = Padding.Empty, Padding = Padding.Empty,
+        };
+        _resetCreditsMenu.Items.Add(host);
+        _resetCreditsMenu.Size = panel.Size;
         _edgeCollapseTimer.Stop();
-        _resetCreditsMenu.Show(this, new Point(_resetCreditsBounds.Left, _resetCreditsBounds.Top),
-            ToolStripDropDownDirection.AboveRight);
+        _resetCreditsMenu.Show(this, new Point(ClientSize.Width, _resetCreditsBounds.Top - 4),
+            ToolStripDropDownDirection.AboveLeft);
     }
 
     private void DrawFooter(Graphics g, UsageState state)
@@ -1534,7 +1582,9 @@ internal sealed class FloatingUsageWindow : Form
         using var font = UiFont("Segoe UI", 8f);
         using var brush = new SolidBrush(_error is null ? MutedTextColor() : Color.FromArgb(210, 106, 35));
         var text = $"{(_stale ? "Cached" : "Refresh")} {UsageFormatter.FormatTime(state.LastSuccessAt)}";
-        var resetText = UsageFormatter.FormatResetCreditsForUi(state.ResetCredits);
+        var credits = state.ResetCredits.Current(DateTimeOffset.UtcNow);
+        if (_stale) credits = credits with { Stale = true };
+        var resetText = UsageFormatter.FormatResetCreditsForUi(credits);
         if (!string.IsNullOrEmpty(resetText)) resetText += " ▾";
         if (string.IsNullOrEmpty(resetText))
         {
@@ -1543,8 +1593,8 @@ internal sealed class FloatingUsageWindow : Form
         }
 
         var resetSize = g.MeasureString(resetText, font);
-        var resetX = Math.Max(18, Width - 18 - resetSize.Width);
-        _resetCreditsBounds = new Rectangle((int)resetX, Height - 32, (int)Math.Ceiling(resetSize.Width), 26);
+        var resetX = Math.Max(18, Width - 18 - (int)Math.Ceiling(resetSize.Width));
+        _resetCreditsBounds = new Rectangle(resetX, Height - 32, Width - 18 - resetX, 26);
         var statusWidth = Math.Max(24, (int)(resetX - 30));
         g.DrawString(TrimToWidth(g, text, font, statusWidth), font, brush, 18, Height - 28);
         g.DrawString(resetText, font, brush, resetX, Height - 28);
@@ -2032,7 +2082,9 @@ internal static class UsageJsonParser
             RequireBool(item, "available"),
             RequireNullableInt32(item, "available_count"),
             OptionalDateTime(item, "next_expires_at"),
-            expirations);
+            expirations,
+            OptionalDateTime(item, "fetched_at"),
+            item.TryGetProperty("stale", out var stale) && stale.ValueKind == JsonValueKind.True);
     }
 
     private static void RequireString(JsonElement root, string name, out string value)
@@ -2141,8 +2193,25 @@ internal sealed record ResetCreditsState(
     bool Available,
     int? AvailableCount,
     DateTimeOffset? NextExpiresAt,
-    IReadOnlyList<DateTimeOffset> ExpiresAt)
+    IReadOnlyList<DateTimeOffset> ExpiresAt,
+    DateTimeOffset? FetchedAt = null,
+    bool Stale = false)
 {
+    public ResetCreditsState Current(DateTimeOffset now)
+    {
+        var current = ExpiresAt.Where(value => value > now).OrderBy(value => value).ToArray();
+        var expired = ExpiresAt.Count - current.Length;
+        var next = current.Length > 0 ? current[0]
+            : NextExpiresAt > now ? NextExpiresAt : null;
+        return this with
+        {
+            ExpiresAt = current,
+            NextExpiresAt = next,
+            AvailableCount = AvailableCount is null ? null : Math.Max(0, AvailableCount.Value - expired),
+            Stale = Stale || expired > 0 || FetchedAt is null || now - FetchedAt.Value > TimeSpan.FromMinutes(2),
+        };
+    }
+
     public static ResetCreditsState Unavailable { get; } = new(false, null, null, Array.Empty<DateTimeOffset>());
 }
 
@@ -2204,10 +2273,12 @@ internal static class UsageFormatter
 
     public static string FormatResetCreditsForUi(ResetCreditsState resetCredits)
     {
+        resetCredits = resetCredits.Current(DateTimeOffset.UtcNow);
         if (!resetCredits.Available || resetCredits.AvailableCount is null)
         {
-            return "";
+            return "Resets --";
         }
+        if (resetCredits.Stale) return $"Resets {resetCredits.AvailableCount.Value} · cached";
 
         var text = $"Resets {resetCredits.AvailableCount.Value}";
         return resetCredits.NextExpiresAt is null
@@ -2217,12 +2288,14 @@ internal static class UsageFormatter
 
     private static string FormatResetCreditsForConsole(ResetCreditsState resetCredits)
     {
+        resetCredits = resetCredits.Current(DateTimeOffset.UtcNow);
         if (!resetCredits.Available || resetCredits.AvailableCount is null)
         {
             return "unavailable";
         }
 
         var text = resetCredits.AvailableCount.Value.ToString(CultureInfo.InvariantCulture);
+        if (resetCredits.Stale) text += " (cached)";
         return resetCredits.NextExpiresAt is null
             ? text
             : $"{text}, next expires {FormatTime(resetCredits.NextExpiresAt)}";

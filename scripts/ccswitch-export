@@ -21,6 +21,7 @@ FIVE_HOUR_MINUTES = 300
 WEEKLY_MINUTES = 10080
 RESET_CREDITS_CACHE = "~/.cache/codex-usage-toolbar/reset-credits.json"
 RESET_CREDITS_TTL_SECONDS = 60
+RESET_CREDITS_RETRY_SECONDS = 15
 
 
 def iso_from_epoch(ts):
@@ -183,6 +184,8 @@ def write_app_server_message(process, message):
 
 def read_app_server_rate_limits(codex_bin, timeout_seconds):
     resolved = shutil.which(codex_bin) if os.path.sep not in codex_bin else os.path.expanduser(codex_bin)
+    if not resolved and codex_bin == "codex":
+        resolved = os.path.expanduser("~/.local/bin/codex")
     if not resolved or not os.path.isfile(resolved):
         raise RuntimeError("Codex CLI was not found")
 
@@ -396,17 +399,35 @@ def save_reset_credits_cache(cache_path, reset_credits):
                 pass
 
 
+def expire_reset_credits(credits, now_epoch):
+    """Age cached credits without presenting expired entries as available."""
+    result = dict(credits)
+    expirations = credits["expires_at"]
+    current = [value for value in expirations if parse_event_timestamp(value) > now_epoch]
+    expired = len(expirations) - len(current)
+    result["expires_at"] = sorted(current, key=parse_event_timestamp)
+    result["next_expires_at"] = result["expires_at"][0] if current else None
+    if expired:
+        if result["available_count"] is not None:
+            result["available_count"] = max(0, result["available_count"] - expired)
+        result["stale"] = True
+    return result
+
+
 def load_reset_credits(codex_bin, timeout_seconds, cache_path, ttl_seconds):
     cached = load_reset_credits_cache(cache_path)
     now_epoch = time.time()
     if cached is not None:
+        cached = expire_reset_credits(cached, now_epoch)
+    if cached is not None:
         cache_age = max(0.0, now_epoch - parse_event_timestamp(cached["checked_at"]))
-        if cache_age < ttl_seconds:
+        retry_after = min(ttl_seconds, RESET_CREDITS_RETRY_SECONDS) if cached["stale"] else ttl_seconds
+        if cache_age < retry_after:
             error = "RESET_CREDITS_STALE" if cached["stale"] else None
             return cached, error
 
     try:
-        fresh = load_reset_credits_from_app_server(codex_bin, timeout_seconds)
+        fresh = expire_reset_credits(load_reset_credits_from_app_server(codex_bin, timeout_seconds), now_epoch)
         if fresh["fetched_at"] is None:
             fresh["fetched_at"] = now_iso()
         fresh["checked_at"] = fresh["fetched_at"]
@@ -414,7 +435,7 @@ def load_reset_credits(codex_bin, timeout_seconds, cache_path, ttl_seconds):
             save_reset_credits_cache(cache_path, fresh)
         except OSError:
             pass
-        return fresh, None
+        return fresh, "RESET_CREDITS_STALE" if fresh["stale"] else None
     except (OSError, RuntimeError, subprocess.SubprocessError):
         if cached is not None:
             cached["stale"] = True
@@ -525,7 +546,7 @@ def export_codex(args):
         errors.append(
             {
                 "code": "QUOTA_PARTIAL",
-                "message": "Some quota windows were not found in Codex session rate_limits.",
+                "message": "Some quota windows are unavailable.",
             }
         )
     if reset_credits_error == "RESET_CREDITS_STALE":
@@ -573,7 +594,7 @@ def build_parser():
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--db", default="~/.cc-switch/cc-switch.db")
     parser.add_argument("--codex-bin", default=os.environ.get("CODEX_CLI_BIN", "codex"))
-    parser.add_argument("--codex-timeout-seconds", type=float, default=3.0)
+    parser.add_argument("--codex-timeout-seconds", type=float, default=8.0)
     parser.add_argument("--reset-credits-cache", default=RESET_CREDITS_CACHE)
     parser.add_argument("--reset-credits-ttl-seconds", type=float, default=RESET_CREDITS_TTL_SECONDS)
     return parser

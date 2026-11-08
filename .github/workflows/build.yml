@@ -65,6 +65,10 @@ jobs:
         shell: pwsh
         run: .\artifacts\publish\win-x64\CodexUsageToolbar.exe --help
 
+      - name: Verify reset-credit expiry and stale cache
+        shell: pwsh
+        run: .\scripts\Validate-ResetCredits.ps1 -ExecutablePath .\artifacts\publish\win-x64\CodexUsageToolbar.exe
+
       - name: Add docs
         shell: pwsh
         run: |

@@ -2,7 +2,7 @@
 
 A lightweight Windows floating toolbar that displays Codex quota, token usage, cache hits, request counts, and estimated cost. A small Ubuntu exporter reads cc-switch data and Codex session rate-limit events; the Windows client fetches its sanitized JSON over SSH.
 
-Current release: `v1.4.0`.
+Current release: `v1.4.1`.
 
 ## Features
 
@@ -48,7 +48,9 @@ Run the toolbar:
 
 The application reads `settings.json` from the current directory first, then from the executable directory. Tray and window changes are saved back to the selected file. Use the tray menu's `Show 5h quota` checkbox to show or hide the 5-hour panel; the choice persists in `showFiveHourQuota`. See `settings.example.json` for every supported setting.
 
-If a refresh fails, the footer keeps the last successful refresh time (marked `Cached`) and the reset-credit summary visible. Hover over the footer for the full error and last event time. The default SSH command timeout is 15 seconds. Existing settings retain their configured value; if `commandTimeoutSeconds` is still `5`, raise it to `15` when exporter calls time out.
+If a refresh fails, the footer keeps the last successful refresh time (marked `Cached`) and the reset-credit summary visible. Hover over the footer for the full error and last event time. The default SSH command timeout is 15 seconds. The old template value of `5` in existing settings is automatically treated as `15`; an explicit `--command-timeout` argument can still override it.
+
+Reset-credit expiry times are filtered against the current time by both the exporter and the Windows client, including when reading old cached responses. Cached reset counts are explicitly marked `cached`; open the summary to see when the credit data was last fetched. The popup follows the toolbar's background, accent color and font size, with aligned date/time columns and its right edge aligned with the main window's right edge. The exporter allows eight seconds for the live Codex query and also checks `~/.local/bin/codex` when SSH's PATH does not include it.
 
 ## Validate the Data Path
 
@@ -92,7 +94,7 @@ The Ubuntu exporter:
 
 Quota or reset-credit data can be unavailable while token data remains valid. The exporter reports those states explicitly instead of inventing values. Reset-credit lookup requires a signed-in Codex CLI version that supports `account/rateLimits/read`; only the count, expiry, and refresh timestamps cross SSH.
 
-Quota and reset-credit metadata are queried together immediately when no cached content exists, then at most once per minute while cached content is available. The exporter keeps the sanitized runtime cache at `~/.cache/codex-usage-toolbar/reset-credits.json`. If a refresh fails, the previous content remains available and is marked stale; the next backend attempt occurs one minute later. This single cache file can be deleted safely to force an immediate query.
+Quota and reset-credit metadata are queried together immediately when no cached content exists, then at most once per minute while cached content is available. The exporter keeps the sanitized runtime cache at `~/.cache/codex-usage-toolbar/reset-credits.json`. If a refresh fails, the previous content remains available and is marked stale; failed queries become eligible for retry after 15 seconds, and the next toolbar poll retries automatically (normally within one minute). No cache deletion or service restart is needed. This single cache file can be deleted safely to force an immediate query.
 
 ## Development
 
@@ -122,6 +124,6 @@ Before creating a new tag:
 
 1. Update the version in `src/CodexUsageToolbar/CodexUsageToolbar.csproj`.
 2. Add the same version and an absolute release date to `CHANGELOG.md`.
-3. Build locally, then create and push a new tag such as `v1.4.0`.
+3. Build locally, then create and push a new tag such as `v1.4.1`.
 
 Do not recreate or move the existing `v1.2.0` tag. See [CHANGELOG.md](CHANGELOG.md) for release history.

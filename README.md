@@ -48,6 +48,8 @@ Run the toolbar:
 
 The application reads `settings.json` from the current directory first, then from the executable directory. Tray and window changes are saved back to the selected file. Use the tray menu's `Show 5h quota` checkbox to show or hide the 5-hour panel; the choice persists in `showFiveHourQuota`. See `settings.example.json` for every supported setting.
 
+If a refresh fails, the footer keeps the last successful refresh time (marked `Cached`) and the reset-credit summary visible. Hover over the footer for the full error and last event time. The default SSH command timeout is 15 seconds. Existing settings retain their configured value; if `commandTimeoutSeconds` is still `5`, raise it to `15` when exporter calls time out.
+
 ## Validate the Data Path
 
 Validate the exporter locally on Ubuntu:

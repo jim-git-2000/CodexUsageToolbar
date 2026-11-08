@@ -5,7 +5,7 @@
   "port": 22,
   "pollIntervalSeconds": 60,
   "connectTimeoutSeconds": 3,
-  "commandTimeoutSeconds": 5,
+  "commandTimeoutSeconds": 15,
   "opacity": 0.95,
   "alwaysOnTop": true,
   "startHidden": false,

@@ -2,6 +2,8 @@
 
 ## v1.4.0 - 2026-11-08
 
+- Kept the last refresh time and clickable reset-credit summary visible when using cached data; moved full refresh errors and event timestamps into a footer tooltip.
+- Increased the default SSH command timeout to 15 seconds to allow exporter aggregation and quota lookup to finish.
 - Added a clickable reset-credit summary that opens all reported expiry times in chronological order, while keeping the nearest expiry visible by default.
 - Kept the floating toolbar expanded while the reset-credit list is open.
 - Adapted usage aggregation to CC Switch v4.0.26 input-token semantics, daily rollups, and proxy/session deduplication.

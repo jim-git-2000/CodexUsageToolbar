@@ -118,7 +118,7 @@ internal static class Program
             string? identityFile = Environment.GetEnvironmentVariable("CODEX_USAGE_IDENTITY_FILE") ?? settings.IdentityFile;
             var port = settings.Port ?? 22;
             var connectTimeoutSeconds = settings.ConnectTimeoutSeconds ?? 3;
-            var commandTimeoutSeconds = settings.CommandTimeoutSeconds ?? 5;
+            var commandTimeoutSeconds = settings.CommandTimeoutSeconds ?? 15;
             var pollIntervalSeconds = settings.PollIntervalSeconds ?? 60;
             var windowX = settings.Window?.X;
             var windowY = settings.Window?.Y;
@@ -816,6 +816,7 @@ internal sealed class FloatingUsageWindow : Form
     private Rectangle _refreshButton;
     private Rectangle _resetCreditsBounds;
     private readonly ContextMenuStrip _resetCreditsMenu = new();
+    private readonly ToolTip _footerToolTip = new() { AutoPopDelay = 30000, InitialDelay = 500, ReshowDelay = 100 };
     private int _shellHookMessage;
     private int _compactHeight = CompactHeight;
     private int _expandedHeight = ExpandedHeight;
@@ -1002,6 +1003,14 @@ internal sealed class FloatingUsageWindow : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+        var detail = _state is not null && !_collapsedToEdge && e.Y >= Height - 34
+            ? $"Last refresh: {_state.LastSuccessAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}\nLast event: {UsageFormatter.FormatTime(_state.LastEventAt)}"
+                + (_error is null ? "" : $"\nUsing cached data. Refresh failed: {_error}\nRetry with Refresh; check SSH connectivity and commandTimeoutSeconds in settings.json.")
+            : "";
+        if (_footerToolTip.GetToolTip(this) != detail)
+        {
+            _footerToolTip.SetToolTip(this, detail);
+        }
         _edgeCollapseTimer.Stop();
         if (_collapsedToEdge)
         {
@@ -1050,6 +1059,7 @@ internal sealed class FloatingUsageWindow : Form
 
     protected override void OnMouseLeave(EventArgs e)
     {
+        _footerToolTip.Hide(this);
         Cursor = Cursors.Default;
         base.OnMouseLeave(e);
         if (!_dragging && _dockEdge != DockEdge.None && !_clickThrough)
@@ -1083,6 +1093,7 @@ internal sealed class FloatingUsageWindow : Form
     {
         if (disposing)
         {
+            _footerToolTip.Dispose();
             _resetCreditsMenu.Dispose();
             _edgeCollapseTimer.Dispose();
         }
@@ -1522,10 +1533,8 @@ internal sealed class FloatingUsageWindow : Form
         _resetCreditsBounds = Rectangle.Empty;
         using var font = UiFont("Segoe UI", 8f);
         using var brush = new SolidBrush(_error is null ? MutedTextColor() : Color.FromArgb(210, 106, 35));
-        var text = _error is null
-            ? $"Refresh {UsageFormatter.FormatTime(state.LastSuccessAt)}  Event {UsageFormatter.FormatTime(state.LastEventAt)}"
-            : $"Using last good data - {_error}";
-        var resetText = _error is null ? UsageFormatter.FormatResetCreditsForUi(state.ResetCredits) : "";
+        var text = $"{(_stale ? "Cached" : "Refresh")} {UsageFormatter.FormatTime(state.LastSuccessAt)}";
+        var resetText = UsageFormatter.FormatResetCreditsForUi(state.ResetCredits);
         if (!string.IsNullOrEmpty(resetText)) resetText += " ▾";
         if (string.IsNullOrEmpty(resetText))
         {

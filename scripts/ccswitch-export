@@ -20,7 +20,7 @@ CODEX_SESSIONS_GLOB = "~/.codex/sessions/**/*.jsonl"
 FIVE_HOUR_MINUTES = 300
 WEEKLY_MINUTES = 10080
 RESET_CREDITS_CACHE = "~/.cache/codex-usage-toolbar/reset-credits.json"
-RESET_CREDITS_TTL_SECONDS = 3600
+RESET_CREDITS_TTL_SECONDS = 60
 
 
 def iso_from_epoch(ts):
@@ -75,27 +75,54 @@ def table_exists(conn, name):
 
 
 def aggregate_window(conn, since_epoch):
-    row = conn.execute(
-        """
-        SELECT
-            COALESCE(SUM(input_tokens), 0),
-            COALESCE(SUM(output_tokens), 0),
-            COALESCE(SUM(cache_read_tokens), 0),
-            COALESCE(SUM(cache_creation_tokens), 0),
-            COALESCE(COUNT(*), 0),
-            COALESCE(SUM(CAST(total_cost_usd AS REAL)), 0)
-        FROM proxy_request_logs
-        WHERE app_type = 'codex'
-          AND created_at >= ?
-        """,
-        (since_epoch,),
-    ).fetchone()
-
-    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, requests, total_cost = row
-    input_tokens = int(input_tokens or 0)
-    total_tokens = input_tokens + int(output_tokens or 0) + int(cache_creation_tokens or 0)
-    hit_tokens = int(cache_read_tokens or 0)
-    hit_rate = (hit_tokens / input_tokens) if input_tokens else 0.0
+    rows = [0] * 6
+    for table in ("proxy_request_logs", "usage_daily_rollups"):
+        if not table_exists(conn, table):
+            continue
+        columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        semantics = "input_token_semantics" if "input_token_semantics" in columns else "0"
+        fresh = f"""CASE WHEN {semantics}=2 THEN input_tokens
+            WHEN {semantics}=1 AND input_tokens>=cache_read_tokens+cache_creation_tokens
+                THEN input_tokens-cache_read_tokens-cache_creation_tokens
+            WHEN {semantics}=0 AND input_tokens>=cache_read_tokens
+                THEN input_tokens-cache_read_tokens ELSE input_tokens END"""
+        if table == "proxy_request_logs":
+            predicate, bound, count = "created_at >= ?", since_epoch, "COUNT(*)"
+        else:
+            # A daily rollup cannot represent a partial day: match CC Switch's bounds.
+            start = datetime.fromtimestamp(since_epoch)
+            from datetime import timedelta
+            if start.time() != datetime.min.time():
+                start += timedelta(days=1)
+            predicate, bound, count = "date >= ?", start.strftime("%Y-%m-%d"), "SUM(request_count)"
+        if table == "proxy_request_logs" and "data_source" in columns:
+            # CC Switch v4.0.26: suppress session copies of successful proxy requests.
+            predicate += """ AND NOT (COALESCE(l.data_source,'proxy') IN
+                ('session_log','codex_session','gemini_session','opencode_session')
+                AND EXISTS (SELECT 1 FROM proxy_request_logs p
+                    WHERE COALESCE(p.data_source,'proxy')='proxy' AND p.app_type=l.app_type
+                    AND p.status_code BETWEEN 200 AND 299
+                    AND p.input_tokens=l.input_tokens AND p.output_tokens=l.output_tokens
+                    AND p.cache_read_tokens=l.cache_read_tokens
+                    AND (p.cache_creation_tokens=l.cache_creation_tokens
+                        OR l.cache_creation_tokens=0
+                        OR (p.cache_creation_tokens=0 AND p.input_token_semantics=0
+                            AND l.data_source='codex_session'))
+                    AND p.created_at BETWEEN l.created_at-600 AND l.created_at+600
+                    AND (LOWER(p.model)=LOWER(l.model) OR LOWER(p.model)='unknown'
+                        OR LOWER(l.model)='unknown' OR (l.data_source='codex_session'
+                        AND LOWER(TRIM(p.request_model))=LOWER(TRIM(l.model))
+                        AND LOWER(TRIM(p.request_model))<>'unknown'))))""" if "input_token_semantics" in columns else ""
+        row = conn.execute(f"""SELECT COALESCE(SUM({fresh}),0),
+            COALESCE(SUM(output_tokens),0), COALESCE(SUM(cache_read_tokens),0),
+            COALESCE(SUM(cache_creation_tokens),0), COALESCE({count},0),
+            COALESCE(SUM(CAST(total_cost_usd AS REAL)),0)
+            FROM {table} l WHERE app_type='codex' AND {predicate}""", (bound,)).fetchone()
+        rows = [x + y for x, y in zip(rows, row)]
+    input_tokens, output_tokens, hit_tokens, creation, requests, total_cost = rows
+    cacheable = input_tokens + hit_tokens + creation
+    total_tokens = cacheable + output_tokens
+    hit_rate = hit_tokens / cacheable if cacheable else 0.0
 
     return {
         "total_tokens": total_tokens,
@@ -240,6 +267,20 @@ def read_app_server_rate_limits(codex_bin, timeout_seconds):
 
 def load_reset_credits_from_app_server(codex_bin, timeout_seconds):
     result = read_app_server_rate_limits(codex_bin, timeout_seconds)
+    credits = reset_credits_from_result(result)
+    limits = result.get("rateLimits") or {}
+    quota = {"five_hour": quota_unavailable(), "weekly": quota_unavailable()}
+    for key in ("primary", "secondary"):
+        item = limits.get(key) or {}
+        name = {300: "five_hour", 10080: "weekly"}.get(item.get("windowDurationMins"))
+        if name:
+            quota[name] = quota_from_rate_limit({"used_percent": item.get("usedPercent"),
+                                                "resets_at": item.get("resetsAt")})
+    credits["quota"] = quota
+    return credits
+
+
+def reset_credits_from_result(result):
     summary = result.get("rateLimitResetCredits")
     if not isinstance(summary, dict):
         return reset_credits_unavailable()
@@ -308,6 +349,7 @@ def parse_reset_credits_cache(raw):
         return None
 
     return {
+        "quota": raw.get("quota"),
         "available": available,
         "available_count": available_count,
         "next_expires_at": next_expires_at,
@@ -467,13 +509,16 @@ def export_codex(args):
         }
         last_event = get_last_event(conn)
 
-    quota = load_quota_from_codex_sessions()
     reset_credits, reset_credits_error = load_reset_credits(
         args.codex_bin,
         args.codex_timeout_seconds,
         args.reset_credits_cache,
         args.reset_credits_ttl_seconds,
     )
+
+    quota = reset_credits.pop("quota", None)
+    if not isinstance(quota, dict) or not any(quota.get(k, {}).get("available") for k in ("five_hour", "weekly")):
+        quota = load_quota_from_codex_sessions()
 
     errors = []
     if not quota["five_hour"]["available"] or not quota["weekly"]["available"]:

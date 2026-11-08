@@ -2,12 +2,12 @@
 
 A lightweight Windows floating toolbar that displays Codex quota, token usage, cache hits, request counts, and estimated cost. A small Ubuntu exporter reads cc-switch data and Codex session rate-limit events; the Windows client fetches its sanitized JSON over SSH.
 
-Current release: `v1.3.0`.
+Current release: `v1.4.0`.
 
 ## Features
 
 - Optional 5-hour quota and always-visible weekly quota, including reset times.
-- Earned Codex rate-limit reset count and the nearest available-credit expiry time when reported by Codex.
+- Earned Codex rate-limit reset count and the nearest available-credit expiry time when reported by Codex. Click the `Resets` summary to see all reported expiry times in chronological order; click outside to close.
 - Today, 1-day, 7-day, 14-day, and 30-day usage windows.
 - Compact and expanded views, ring or bar quota layouts, dark or light backgrounds, accent colors, and adjustable font size.
 - Tray controls, click-through, always-on-top, start-with-Windows, resizing, and edge auto-hide.
@@ -28,7 +28,7 @@ bash scripts/install-ubuntu-exporter.sh
 bash scripts/check-p1-exporter.sh
 ```
 
-The installer writes `~/.local/bin/ccswitch-export`. Re-run it after changing `scripts/ccswitch-export`.
+The exporter runs on demand over SSH when the Windows toolbar starts and on each refresh (every 60 seconds by default); it does not need an Ubuntu startup service. The installer writes `~/.local/bin/ccswitch-export`. Re-run it after changing `scripts/ccswitch-export`.
 
 On Windows, copy `settings.example.json` to `settings.json` next to `CodexUsageToolbar.exe`, then set `sshHost`:
 
@@ -82,15 +82,15 @@ The Windows application only invokes `ssh.exe`, parses exporter JSON, and render
 
 The Ubuntu exporter:
 
-- aggregates Codex-only token and estimated-cost fields from cc-switch's `proxy_request_logs`;
-- reads only non-secret `rate_limits` fields from Codex session JSONL files;
+- aggregates Codex-only usage from CC Switch v4.0.26 request logs and daily rollups, normalizes legacy/total/fresh input-token semantics, and excludes session copies of proxy requests;
+- queries live quota and reset credits together via Codex app-server, falling back to non-secret session `rate_limits` when quota is unavailable;
 - asks the local Codex app-server for earned reset-credit count and expiry metadata without reading or exporting `auth.json`;
 - returns schema version `1.1` for `today`, `1d`, `7d`, `14d`, and `30d`;
 - opens the cc-switch database read-only.
 
 Quota or reset-credit data can be unavailable while token data remains valid. The exporter reports those states explicitly instead of inventing values. Reset-credit lookup requires a signed-in Codex CLI version that supports `account/rateLimits/read`; only the count, expiry, and refresh timestamps cross SSH.
 
-Reset-credit metadata is queried immediately when no cached content exists, then at most once per hour while cached content is available. The exporter keeps the sanitized runtime cache at `~/.cache/codex-usage-toolbar/reset-credits.json`. If an hourly refresh fails, the previous content remains available and is marked stale; the next backend attempt occurs one hour later. This single cache file can be deleted safely to force an immediate query.
+Quota and reset-credit metadata are queried together immediately when no cached content exists, then at most once per minute while cached content is available. The exporter keeps the sanitized runtime cache at `~/.cache/codex-usage-toolbar/reset-credits.json`. If a refresh fails, the previous content remains available and is marked stale; the next backend attempt occurs one minute later. This single cache file can be deleted safely to force an immediate query.
 
 ## Development
 
@@ -120,6 +120,6 @@ Before creating a new tag:
 
 1. Update the version in `src/CodexUsageToolbar/CodexUsageToolbar.csproj`.
 2. Add the same version and an absolute release date to `CHANGELOG.md`.
-3. Build locally, then create and push a new tag such as `v1.3.0`.
+3. Build locally, then create and push a new tag such as `v1.4.0`.
 
 Do not recreate or move the existing `v1.2.0` tag. See [CHANGELOG.md](CHANGELOG.md) for release history.

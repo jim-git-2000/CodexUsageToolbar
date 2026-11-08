@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0 - 2026-11-08
+
+- Added a clickable reset-credit summary that opens all reported expiry times in chronological order, while keeping the nearest expiry visible by default.
+- Kept the floating toolbar expanded while the reset-credit list is open.
+- Adapted usage aggregation to CC Switch v4.0.26 input-token semantics, daily rollups, and proxy/session deduplication.
+- Queried live quota and reset credits together through the Codex app-server, with a one-minute cache and session-quota fallback.
+- Clarified that the Ubuntu exporter runs on demand over SSH and needs no startup service.
+
 ## v1.3.0 - 2026-07-22
 
 - Added a persistent tray switch for showing or hiding the 5-hour quota panel.

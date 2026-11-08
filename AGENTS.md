@@ -51,4 +51,4 @@
 - 本地构建使用仓库根目录的 `NuGet.config`；CI 自包含发布使用 `NuGet.CI.config` 和 `.github/workflows/build.yml`
 - 修改 C# 后运行 Release build；修改 shell/Python exporter 后运行语法检查，并在可访问真实数据源时运行 exporter contract 验证
 - `settings.example.json` 是公开模板；不要把真实 SSH 主机、私钥路径、凭据或本机运行态写入仓库
-- 当前版本为 `v1.2.0`；新版本必须同步更新 `.csproj`、`CHANGELOG.md` 和 tag
+- 当前版本为 `v1.4.0`；新版本必须同步更新 `.csproj`、`CHANGELOG.md` 和 tag

@@ -814,6 +814,8 @@ internal sealed class FloatingUsageWindow : Form
     private Rectangle _layoutButton;
     private Rectangle _toggleButton;
     private Rectangle _refreshButton;
+    private Rectangle _resetCreditsBounds;
+    private readonly ContextMenuStrip _resetCreditsMenu = new();
     private int _shellHookMessage;
     private int _compactHeight = CompactHeight;
     private int _expandedHeight = ExpandedHeight;
@@ -852,6 +854,7 @@ internal sealed class FloatingUsageWindow : Form
         _expandedHeight = Math.Max(ExpandedHeight, Height);
         _visibleBounds = Bounds;
         _edgeCollapseTimer = new System.Windows.Forms.Timer { Interval = 160 };
+        _resetCreditsMenu.Closed += (_, _) => _edgeCollapseTimer.Start();
         _edgeCollapseTimer.Tick += (_, _) =>
         {
             _edgeCollapseTimer.Stop();
@@ -976,6 +979,12 @@ internal sealed class FloatingUsageWindow : Form
             return;
         }
 
+        if (e.Button == MouseButtons.Left && _resetCreditsBounds.Contains(e.Location))
+        {
+            ShowResetCredits();
+            return;
+        }
+
         if (_refreshButton.Contains(e.Location))
         {
             RefreshRequested?.Invoke(this, EventArgs.Empty);
@@ -1013,7 +1022,7 @@ internal sealed class FloatingUsageWindow : Form
         }
         else
         {
-            Cursor = GetResizeCursor(e.Location);
+            Cursor = _resetCreditsBounds.Contains(e.Location) ? Cursors.Hand : GetResizeCursor(e.Location);
         }
     }
 
@@ -1074,6 +1083,7 @@ internal sealed class FloatingUsageWindow : Form
     {
         if (disposing)
         {
+            _resetCreditsMenu.Dispose();
             _edgeCollapseTimer.Dispose();
         }
 
@@ -1194,6 +1204,7 @@ internal sealed class FloatingUsageWindow : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        _resetCreditsBounds = Rectangle.Empty;
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         if (_collapsedToEdge)
@@ -1476,14 +1487,46 @@ internal sealed class FloatingUsageWindow : Form
         }
     }
 
+    private void ShowResetCredits()
+    {
+        var credits = _state?.ResetCredits;
+        if (credits is null || !credits.Available)
+        {
+            return;
+        }
+
+        _resetCreditsMenu.Items.Clear();
+        _resetCreditsMenu.ShowImageMargin = false;
+        _resetCreditsMenu.BackColor = _lightMode ? Color.White : Color.FromArgb(32, 32, 36);
+        _resetCreditsMenu.ForeColor = PrimaryTextColor();
+        _resetCreditsMenu.Items.Add($"Reset credits: {credits.AvailableCount}");
+        _resetCreditsMenu.Items.Add(new ToolStripSeparator());
+        var expirations = credits.ExpiresAt.OrderBy(value => value).ToArray();
+        for (var i = 0; i < expirations.Length; i++)
+        {
+            var local = expirations[i].ToLocalTime();
+            _resetCreditsMenu.Items.Add($"{i + 1}. Expires {local:yyyy-MM-dd HH:mm:ss}");
+        }
+        if (expirations.Length == 0)
+        {
+            _resetCreditsMenu.Items.Add(credits.AvailableCount == 0
+                ? "No reset credits available" : "Expiry times unavailable");
+        }
+        _edgeCollapseTimer.Stop();
+        _resetCreditsMenu.Show(this, new Point(_resetCreditsBounds.Left, _resetCreditsBounds.Top),
+            ToolStripDropDownDirection.AboveRight);
+    }
+
     private void DrawFooter(Graphics g, UsageState state)
     {
+        _resetCreditsBounds = Rectangle.Empty;
         using var font = UiFont("Segoe UI", 8f);
         using var brush = new SolidBrush(_error is null ? MutedTextColor() : Color.FromArgb(210, 106, 35));
         var text = _error is null
             ? $"Refresh {UsageFormatter.FormatTime(state.LastSuccessAt)}  Event {UsageFormatter.FormatTime(state.LastEventAt)}"
             : $"Using last good data - {_error}";
         var resetText = _error is null ? UsageFormatter.FormatResetCreditsForUi(state.ResetCredits) : "";
+        if (!string.IsNullOrEmpty(resetText)) resetText += " ▾";
         if (string.IsNullOrEmpty(resetText))
         {
             g.DrawString(TrimToWidth(g, text, font, Width - 36), font, brush, 18, Height - 28);
@@ -1492,6 +1535,7 @@ internal sealed class FloatingUsageWindow : Form
 
         var resetSize = g.MeasureString(resetText, font);
         var resetX = Math.Max(18, Width - 18 - resetSize.Width);
+        _resetCreditsBounds = new Rectangle((int)resetX, Height - 32, (int)Math.Ceiling(resetSize.Width), 26);
         var statusWidth = Math.Max(24, (int)(resetX - 30));
         g.DrawString(TrimToWidth(g, text, font, statusWidth), font, brush, 18, Height - 28);
         g.DrawString(resetText, font, brush, resetX, Height - 28);
@@ -1685,6 +1729,7 @@ internal sealed class FloatingUsageWindow : Form
 
     private void CollapseToEdgeIfPointerOutside()
     {
+        if (_resetCreditsMenu.Visible) return;
         if (_dragging || _dockEdge == DockEdge.None || _clickThrough || _collapsedToEdge)
         {
             return;
